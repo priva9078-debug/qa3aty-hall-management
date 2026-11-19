@@ -28,3 +28,8 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Application architecture
+- Keep Flutter-facing endpoints in TanStack public API routes under `/api/public/v1`; this path is required so external mobile clients can reach the app without the web preview gate.
+- Keep credential mapping, privileged account provisioning, tenant authorization, and subscription checks in server-only modules; public clients receive only Supabase Auth sessions and tenant-scoped JSON.
+- Store app-owned database structure in the managed database migrations, and use database row-level policies plus composite tenant foreign keys as the final tenant-isolation boundary.
