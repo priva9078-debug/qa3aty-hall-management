@@ -15,6 +15,13 @@
       "when": 1795127511193,
       "tag": "0001_qa3aty_lock_down_internal_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795127749989,
+      "tag": "0002_qa3aty_provisioning_security",
+      "breakpoints": true
     }
   ]
 }

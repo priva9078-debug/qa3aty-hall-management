@@ -1117,6 +1117,28 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      bootstrap_super_admin: {
+        Args: { _full_name: string; _user_id: string; _username: string }
+        Returns: string
+      }
+      create_tenant_bundle: {
+        Args: {
+          _actor_user_id: string
+          _admin_user_id: string
+          _ends_at: string
+          _full_name: string
+          _notes: string
+          _phone: string
+          _plan: string
+          _primary_hall_name: string
+          _starts_at: string
+          _subscription_price: number
+          _tenant_name: string
+          _tenant_status: string
+          _username: string
+        }
+        Returns: string
+      }
       current_tenant_id: { Args: never; Returns: string }
       has_role: {
         Args: {
