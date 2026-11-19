@@ -1,5 +1,20 @@
 {
   "version": "7",
   "dialect": "postgresql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1795127343416,
+      "tag": "0000_qa3aty_security_first_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795127511193,
+      "tag": "0001_qa3aty_lock_down_internal_functions",
+      "breakpoints": true
+    }
+  ]
 }

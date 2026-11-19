@@ -1,0 +1,13 @@
+REVOKE ALL ON FUNCTION public.apply_inventory_movement() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.audit_booking_payment_change() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.check_booking_conflict() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.prevent_booking_overpayment() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.record_initial_advance_payment() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.sync_booking_payment_totals() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.touch_updated_at() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.has_role(UUID, public.app_role) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(UUID, public.app_role) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.current_tenant_id() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.current_tenant_id() TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.tenant_accessible(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.tenant_accessible(UUID) TO authenticated, service_role;
