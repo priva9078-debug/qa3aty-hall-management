@@ -32,7 +32,7 @@ export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const request = getRequest();
     if (!request || internalEmail(data.username).split("@")[0] !== BOOTSTRAP_USERNAME) return asError("اسم المستخدم غير متاح.");
-    checkPassword(data.password, data.password);
+    checkPassword(data.password, data.passwordConfirmation);
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: existingRole, error: roleError } = await supabaseAdmin
@@ -42,6 +42,8 @@ export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
       .maybeSingle();
     if (roleError) return asError("تعذر التحقق من حالة التهيئة.", 500);
     if (existingRole) return asError("تم إعداد حساب المطوّر بالفعل.", 409);
+    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1 });
+    if ((authUsers.users ?? []).length > 0) return asError("توجد حسابات دخول مسبقًا. أعد المحاولة من خلال حساب المطوّر الحالي.", 409);
 
     const email = internalEmail(data.username);
     const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
@@ -63,6 +65,13 @@ export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
     }
     return { ok: true as const };
   });
+
+export const getBootstrapStatus = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "super_admin").maybeSingle();
+  if (error) return { state: "unavailable" as const };
+  return { state: data ? "complete" as const : "ready" as const };
+});
 
 export const loginWithUsername = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => loginInputSchema.parse(input))

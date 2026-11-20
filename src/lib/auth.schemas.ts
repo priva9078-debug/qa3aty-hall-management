@@ -4,6 +4,10 @@ export const bootstrapInputSchema = z.object({
   username: z.string().trim().min(3).max(32),
   fullName: z.string().trim().min(2).max(160),
   password: z.string().min(12).max(128),
+  passwordConfirmation: z.string().min(12).max(128),
+}).refine((value) => value.password === value.passwordConfirmation, {
+  message: "كلمتا المرور غير متطابقتين.",
+  path: ["passwordConfirmation"],
 });
 
 export const loginInputSchema = z.object({
