@@ -1,10 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowDownLeft, ArrowUpLeft, Building2, CalendarDays, Check, ChevronDown, CircleDollarSign,
-  Clock3, DoorOpen, House, KeyRound, LayoutDashboard, LogOut, MoreHorizontal, Plus, Search,
-  ShieldCheck, UserRound, Users, WalletCards,
+  ArrowUpLeft, Building2, CalendarDays, Check, ChevronDown,
+  Clock3, DoorOpen, House, KeyRound, LayoutDashboard, LogOut, Plus, Search,
+  ShieldCheck, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,7 +19,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { createDeveloperTenant, extendTenantSubscription, getDeveloperDashboard, listDeveloperTenants, resetTenantPassword, setTenantStatus } from "@/lib/auth.functions";
 
 type Dashboard = Extract<Awaited<ReturnType<typeof getDeveloperDashboard>>, { state: "ready" }>;
-type Tenant = NonNullable<Awaited<ReturnType<typeof listDeveloperTenants>> extends { tenants?: infer T } ? T : never>[number];
+type Tenant = Extract<Awaited<ReturnType<typeof listDeveloperTenants>>, { tenants: unknown[] }>["tenants"][number];
 type Panel = "overview" | "customers";
 type Modal = "create" | "extend" | "reset" | null;
 
@@ -119,7 +119,7 @@ function DeveloperDashboard() {
 
   const expiringCount = dashboard?.metrics.expiringSoon ?? 0;
   const title = panel === "overview" ? "نظرة عامة" : "إدارة العملاء";
-  const filteredCount = useMemo(() => tenants.length, [tenants]);
+  const filteredCount = tenants.length;
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -262,11 +262,11 @@ function DeveloperDashboard() {
 
 function ArrowLeftIcon() { return <ArrowUpLeft className="size-4"/>; }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return <div className="space-y-2"><Label className="qa3aty-label">{label}</Label>{children}</div>;
 }
 
-function Metric({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: number; tone: "navy" | "green" | "gold" | "rose" | "purple" }) {
+function Metric({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number; tone: "navy" | "green" | "gold" | "rose" | "purple" }) {
   return <div className="border-y border-border bg-card px-4 py-4 first:border-t sm:rounded-md sm:border"><div className={`qa3aty-metric-icon qa3aty-metric-${tone}`}>{icon}</div><div className="mt-3 text-2xl font-semibold tabular-nums">{new Intl.NumberFormat("ar-EG").format(value)}</div><p className="mt-1 text-xs leading-5 text-muted-foreground">{label}</p></div>;
 }
 

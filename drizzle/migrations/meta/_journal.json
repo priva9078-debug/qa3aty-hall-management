@@ -22,6 +22,27 @@
       "when": 1795127749989,
       "tag": "0002_qa3aty_provisioning_security",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795251457447,
+      "tag": "0003_qa3aty_tenant_access_guards_and_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795251543670,
+      "tag": "0004_qa3aty_tenant_account_cardinality",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795251611197,
+      "tag": "0005_qa3aty_unique_customer_phone_per_tenant",
+      "breakpoints": true
     }
   ]
 }

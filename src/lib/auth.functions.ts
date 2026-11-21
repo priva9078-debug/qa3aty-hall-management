@@ -18,9 +18,7 @@ function internalEmail(username: string) {
 
 function checkPassword(password: string, repeatedPassword: string) {
   const savedPassword = process.env["QA3ATY_BOOTSTRAP_PASSWORD"];
-  if (!savedPassword || password !== savedPassword || repeatedPassword !== savedPassword) {
-    throw new Error("بيانات التهيئة غير متطابقة. أدخل كلمة المرور والرمز المحفوظين لديك.");
-  }
+  return Boolean(savedPassword && password === savedPassword && repeatedPassword === savedPassword);
 }
 
 function asError(message: string, status = 400) {
@@ -32,7 +30,7 @@ export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const request = getRequest();
     if (!request || internalEmail(data.username).split("@")[0] !== BOOTSTRAP_USERNAME) return asError("اسم المستخدم غير متاح.");
-    checkPassword(data.password, data.passwordConfirmation);
+    if (!checkPassword(data.password, data.passwordConfirmation)) return asError("تعذر التحقق من كلمة المرور الأولية.", 403);
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: existingRole, error: roleError } = await supabaseAdmin
@@ -214,7 +212,7 @@ export const getDeveloperDashboard = createServerFn({ method: "GET" })
       metrics: {
         totalTenants: tenants.count ?? 0,
         activeTenants: activeTenants.count ?? 0,
-        suspendedTenants: (recent.data ?? []).filter((tenant) => tenant.status === "suspended").length,
+        suspendedTenants: suspendedTenants.count ?? 0,
         halls: halls.count ?? 0,
         expiredSubscriptions: expiredSubscriptions.count ?? 0,
         expiringSoon: expiringSoon.count ?? 0,

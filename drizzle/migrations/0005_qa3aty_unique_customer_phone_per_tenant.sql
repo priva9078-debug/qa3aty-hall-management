@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS customers_unique_phone_per_tenant_idx ON public.customers (tenant_id, phone);

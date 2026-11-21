@@ -157,7 +157,15 @@
 
 @layer components {
   .qa3aty-shell { @apply min-h-screen bg-background text-foreground; }
+  .qa3aty-login { background-color: var(--background); color: var(--foreground); }
   .qa3aty-input { @apply h-10 rounded-md border-border bg-background text-right; }
   .qa3aty-label { @apply text-sm font-medium text-foreground; }
   .qa3aty-muted { @apply text-sm text-muted-foreground; }
+  .qa3aty-metric-icon { @apply grid size-9 place-items-center rounded-md; }
+  .qa3aty-metric-icon svg { width: 1rem; height: 1rem; }
+  .qa3aty-metric-navy { color: var(--primary); background-color: color-mix(in oklch, var(--primary) 11%, var(--card)); }
+  .qa3aty-metric-green { color: var(--chart-2); background-color: color-mix(in oklch, var(--chart-2) 11%, var(--card)); }
+  .qa3aty-metric-gold { color: var(--chart-3); background-color: color-mix(in oklch, var(--chart-3) 12%, var(--card)); }
+  .qa3aty-metric-rose { color: var(--destructive); background-color: color-mix(in oklch, var(--destructive) 9%, var(--card)); }
+  .qa3aty-metric-purple { color: var(--chart-4); background-color: color-mix(in oklch, var(--chart-4) 11%, var(--card)); }
 }

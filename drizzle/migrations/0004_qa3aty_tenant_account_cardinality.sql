@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS profiles_one_admin_per_tenant_idx ON public.profiles (tenant_id) WHERE tenant_id IS NOT NULL;
