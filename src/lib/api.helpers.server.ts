@@ -42,11 +42,14 @@ function fetchWithPublishableKey(key: string): typeof fetch {
   };
 }
 
-export function createPublicClient() {
+export function createPublicClient(accessToken?: string) {
   const { url, key } = getBaseCredentials();
   return createClient<Database>(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: { fetch: fetchWithPublishableKey(key) },
+    global: {
+      fetch: fetchWithPublishableKey(key),
+      ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : {}),
+    },
   });
 }
 
@@ -57,7 +60,7 @@ export async function loadUser(request: Request, requireTenant = true): Promise<
   if (!token) return { response: apiError("unauthorized", "يلزم تسجيل الدخول.", 401) };
 
   try {
-    const client = createPublicClient();
+    const client = createPublicClient(token);
     const { data: auth, error: authError } = await client.auth.getUser(token);
     if (authError || !auth.user) return { response: apiError("invalid_token", "جلسة الدخول غير صالحة.", 401) };
 

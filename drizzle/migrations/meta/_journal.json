@@ -43,6 +43,13 @@
       "when": 1795251611197,
       "tag": "0005_qa3aty_unique_customer_phone_per_tenant",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795336530266,
+      "tag": "0006_qa3aty_reminder_queue_and_financial_reports",
+      "breakpoints": true
     }
   ]
 }
