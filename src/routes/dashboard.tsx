@@ -93,7 +93,7 @@ function DeveloperDashboard() {
         setDashboard(result);
         const listed = await loadTenants({ data: { search, status: statusFilter as "all" | "active" | "suspended" } });
         if ("tenants" in listed && listed.ok) setTenants(listed.tenants as Tenant[]);
-      } else if (result.state === "signed_out") {
+      } else if ((result.state as string) === "signed_out") {
         await navigate({ to: "/" });
       } else if (result.state === "forbidden") {
         setDashboard(null);

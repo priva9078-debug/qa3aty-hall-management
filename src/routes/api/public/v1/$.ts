@@ -14,7 +14,7 @@ const hallSchema = z.object({
   default_booking_price: z.number().min(0).max(999_999_999_999).optional(), image_path: z.string().max(500).optional(), is_active: z.boolean().optional(),
 });
 const customerSchema = z.object({ full_name: z.string().trim().min(2).max(160), phone: z.string().trim().min(3).max(40), address: z.string().max(500).optional(), notes: z.string().max(4000).optional() });
-const bookingSchema = z.object({
+const bookingBaseSchema = z.object({
   hall_id: idSchema,
   customer_id: idSchema.optional(),
   customer: customerSchema.optional(),
@@ -28,7 +28,8 @@ const bookingSchema = z.object({
   status: z.enum(["pending", "confirmed"]).default("pending"),
   drinks_cake_responsibility: z.enum(["tenant", "customer"]).default("tenant"),
   notes: z.string().max(4000).optional(),
-}).refine((booking) => Boolean(booking.customer_id || booking.customer), { message: "اختر عميلًا أو أرسل بيانات عميل جديد." });
+});
+const bookingSchema = bookingBaseSchema.refine((booking) => Boolean(booking.customer_id || booking.customer), { message: "اختر عميلًا أو أرسل بيانات عميل جديد." });
 const paymentSchema = z.object({ amount: z.number().positive().max(999_999_999_999), payment_date: z.string().datetime().optional(), payment_method: z.enum(["cash", "bank_transfer", "other"]), notes: z.string().max(4000).optional() });
 const expenseSchema = z.object({ category_id: idSchema.optional().nullable(), description: z.string().trim().min(1).max(240), amount: z.number().positive().max(999_999_999_999), expense_date: dateSchema, hall_id: idSchema.optional().nullable(), booking_id: idSchema.optional().nullable(), receipt_path: z.string().max(500).optional().nullable(), notes: z.string().max(4000).optional() });
 const workerSchema = z.object({ full_name: z.string().trim().min(2).max(160), phone: z.string().max(40).optional(), job_title: z.string().max(120).optional(), salary_type: z.enum(["fixed", "daily"]), fixed_salary: z.number().min(0).optional(), daily_wage: z.number().min(0).optional(), joining_date: dateSchema.optional(), status: z.enum(["active", "inactive"]).default("active") });
@@ -150,7 +151,7 @@ async function tenantRoute(request: Request) {
       user.client.from("halls").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("is_active", true),
       user.client.from("customers").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
       user.client.from("bookings").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).neq("status", "cancelled"),
-      user.client.rpc("financial_report", { _tenant_id: tenantId, _start_date: new Date().toISOString().slice(0, 10), _end_date: new Date().toISOString().slice(0, 10), _hall_id: null }),
+      user.client.rpc("financial_report", { _tenant_id: tenantId, _start_date: new Date().toISOString().slice(0, 10), _end_date: new Date().toISOString().slice(0, 10) }),
       user.client.from("bookings").select("id,event_name,event_date,start_time,status,remaining_balance,halls(name),customers(full_name,phone)").eq("tenant_id", tenantId).gte("event_date", new Date().toISOString().slice(0, 10)).neq("status", "cancelled").order("event_date").limit(5),
     ]);
     if (financial === null) return apiError("report_unavailable", "تعذر تحميل الملخص المالي.", 500);
@@ -173,7 +174,7 @@ async function tenantRoute(request: Request) {
     if (method === "POST" && !id) {
       const body = await jsonBody(request, hallSchema);
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("halls").insert({ ...body.data, tenant_id: tenantId }).select().single();
+      const { data, error } = await user.client.from("halls").insert({ ...body.data, tenant_id: tenantId } as any).select().single();
       return error ? apiError("hall_create_failed", "تعذر إضافة القاعة.", 400) : apiResponse(data, 201);
     }
     if (id && !idSchema.safeParse(id).success) return apiError("not_found", "القاعة غير موجودة.", 404);
@@ -185,7 +186,7 @@ async function tenantRoute(request: Request) {
     if (id && method === "PUT") {
       const body = await jsonBody(request, hallSchema.partial());
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("halls").update(body.data).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
+      const { data, error } = await user.client.from("halls").update(body.data as any).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
       if (error) return apiError("hall_update_failed", "تعذر تحديث القاعة.", 400);
       return data ? apiResponse(data) : apiError("not_found", "القاعة غير موجودة.", 404);
     }
@@ -212,7 +213,7 @@ async function tenantRoute(request: Request) {
       const phone = normalizePhone(body.data.phone);
       const { data: existing } = await user.client.from("customers").select("*").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
       if (existing) return apiResponse({ ...existing, reused_existing: true });
-      const { data, error } = await user.client.from("customers").insert({ ...body.data, phone, tenant_id: tenantId }).select().single();
+      const { data, error } = await user.client.from("customers").insert({ ...body.data, phone, tenant_id: tenantId } as any).select().single();
       if (error?.code === "23505") {
         const { data: raced } = await user.client.from("customers").select("*").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
         if (raced) return apiResponse({ ...raced, reused_existing: true });
@@ -229,13 +230,35 @@ async function tenantRoute(request: Request) {
       const body = await jsonBody(request, customerSchema.partial());
       if ("response" in body) return body.response;
       const values = body.data.phone ? { ...body.data, phone: normalizePhone(body.data.phone) } : body.data;
-      const { data, error } = await user.client.from("customers").update(values).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
+      const { data, error } = await user.client.from("customers").update(values as any).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
       if (error) return apiError("customer_update_failed", error.code === "23505" ? "رقم الهاتف مسجل لعميل آخر." : "تعذر تحديث بيانات العميل.", 400);
       return data ? apiResponse(data) : apiError("not_found", "العميل غير موجود.", 404);
+    }
+    if (id && method === "DELETE") {
+      const { count } = await user.client.from("bookings").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("customer_id", id);
+      if (count && count > 0) return apiError("customer_has_bookings", "لا يمكن حذف العميل لوجود حجوزات سابقة مرتبطة به.", 409);
+      const { data, error } = await user.client.from("customers").delete().eq("tenant_id", tenantId).eq("id", id).select("id").maybeSingle();
+      if (error) return apiError("customer_delete_failed", "تعذر حذف العميل.", 400);
+      return data ? apiResponse({ id, deleted: true }) : apiError("not_found", "العميل غير موجود.", 404);
     }
   }
 
   if (path[0] === "bookings") {
+    if (path[1] === "calendar" && method === "GET") {
+      let query = user.client.from("bookings").select("id,event_name,event_type,event_date,start_time,end_time,total_price,total_paid,remaining_balance,status,drinks_cake_responsibility,halls(id,name),customers(id,full_name,phone)").eq("tenant_id", tenantId).order("event_date", { ascending: true });
+      const hall = url.searchParams.get("hall_id");
+      const start = url.searchParams.get("start_date");
+      const end = url.searchParams.get("end_date");
+      const status = url.searchParams.get("status");
+      if (hall && idSchema.safeParse(hall).success) query = query.eq("hall_id", hall);
+      if (start && dateSchema.safeParse(start).success) query = query.gte("event_date", start);
+      if (end && dateSchema.safeParse(end).success) query = query.lte("event_date", end);
+      if (status && ["pending", "confirmed", "completed", "cancelled"].includes(status)) query = query.eq("status", status);
+      const { data, error } = await query;
+      if (error) return apiError("query_failed", "تعذر تحميل تقويم الحجوزات.", 500);
+      return apiResponse(data);
+    }
+
     const id = path[1];
     const action = path[2];
     if (method === "GET" && !id) {
@@ -264,7 +287,7 @@ async function tenantRoute(request: Request) {
         const { data: existing } = await user.client.from("customers").select("id").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
         customerId = existing?.id;
         if (!customerId) {
-          const { data: createdCustomer, error: customerError } = await user.client.from("customers").insert({ ...customer, phone, tenant_id: tenantId }).select("id").single();
+          const { data: createdCustomer, error: customerError } = await user.client.from("customers").insert({ ...customer, phone, tenant_id: tenantId } as any).select("id").single();
           if (customerError?.code === "23505") {
             const { data: raced } = await user.client.from("customers").select("id").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
             customerId = raced?.id;
@@ -274,7 +297,7 @@ async function tenantRoute(request: Request) {
       }
       if (!customerId) return apiError("customer_required", "لم يتم العثور على العميل.", 400);
       const { customer: _customer, customer_id: _customerId, ...values } = body.data;
-      const { data, error } = await user.client.from("bookings").insert({ ...values, customer_id: customerId, tenant_id: tenantId, created_by: user.userId }).select("*,halls(id,name),customers(id,full_name,phone)").single();
+      const { data, error } = await user.client.from("bookings").insert({ ...values, customer_id: customerId, tenant_id: tenantId, created_by: user.userId } as any).select("*,halls(id,name),customers(id,full_name,phone)").single();
       if (error) {
         if (error.code === "23P01" || error.message.includes("BOOKING_TIME_CONFLICT")) return apiError("booking_conflict", "القاعة محجوزة في هذا التوقيت.", 409);
         if (error.code === "23514") return apiError("invalid_booking_amount", "الدفعة المقدمة لا يمكن أن تتجاوز إجمالي قيمة الحجز.", 400);
@@ -291,22 +314,35 @@ async function tenantRoute(request: Request) {
       if (method === "POST") {
         const body = await jsonBody(request, paymentSchema);
         if ("response" in body) return body.response;
-        const { data, error } = await user.client.from("booking_payments").insert({ ...body.data, tenant_id: tenantId, booking_id: id, created_by: user.userId }).select().single();
+        const { data, error } = await user.client.from("booking_payments").insert({ ...body.data, tenant_id: tenantId, booking_id: id, created_by: user.userId } as any).select().single();
         if (error) return apiError(error.message.includes("PAYMENT_EXCEEDS_REMAINING_BALANCE") ? "payment_exceeds_balance" : "payment_create_failed", error.message.includes("PAYMENT_EXCEEDS_REMAINING_BALANCE") ? "قيمة الدفعة أكبر من الرصيد المتبقي." : "تعذر تسجيل الدفعة.", error.message.includes("PAYMENT_EXCEEDS_REMAINING_BALANCE") ? 409 : 400);
         const { data: booking } = await user.client.from("bookings").select("total_price,total_paid,remaining_balance").eq("tenant_id", tenantId).eq("id", id).maybeSingle();
         return apiResponse({ ...data, booking_balance: booking }, 201);
       }
     }
     if (id && action === "items") {
-      if (method === "GET") {
+      const itemId = path[3];
+      if (method === "GET" && !itemId) {
         const { data, error } = await user.client.from("booking_items").select("*").eq("tenant_id", tenantId).eq("booking_id", id).order("created_at");
         return error ? apiError("query_failed", "تعذر تحميل مستلزمات المناسبة.", 500) : apiResponse(data);
       }
-      if (method === "POST") {
+      if (method === "POST" && !itemId) {
         const body = await jsonBody(request, itemSchema);
         if ("response" in body) return body.response;
-        const { data, error } = await user.client.from("booking_items").insert({ ...body.data, tenant_id: tenantId, booking_id: id }).select().single();
+        const { data, error } = await user.client.from("booking_items").insert({ ...body.data, tenant_id: tenantId, booking_id: id } as any).select().single();
         return error ? apiError("booking_item_invalid", "تعذر حفظ مستلزمات المناسبة.", 400) : apiResponse(data, 201);
+      }
+      if (itemId && idSchema.safeParse(itemId).success) {
+        if (method === "PUT") {
+          const body = await jsonBody(request, itemSchema.partial());
+          if ("response" in body) return body.response;
+          const { data, error } = await user.client.from("booking_items").update(body.data as any).eq("tenant_id", tenantId).eq("booking_id", id).eq("id", itemId).select().maybeSingle();
+          return error ? apiError("booking_item_invalid", "تعذر تحديث مستلزمات المناسبة.", 400) : data ? apiResponse(data) : apiError("not_found", "المستلزم غير موجود.", 404);
+        }
+        if (method === "DELETE") {
+          const { data, error } = await user.client.from("booking_items").delete().eq("tenant_id", tenantId).eq("booking_id", id).eq("id", itemId).select("id").maybeSingle();
+          return error ? apiError("booking_item_delete_failed", "تعذر حذف المستلزم.", 400) : data ? apiResponse({ id: itemId, deleted: true }) : apiError("not_found", "المستلزم غير موجود.", 404);
+        }
       }
     }
     if (id && !action && method === "GET") {
@@ -315,15 +351,29 @@ async function tenantRoute(request: Request) {
       return data ? apiResponse(data) : apiError("not_found", "الحجز غير موجود.", 404);
     }
     if (id && !action && method === "PUT") {
-      const body = await jsonBody(request, bookingSchema.omit({ customer: true, customer_id: true, advance_payment: true }).extend({ customer_id: idSchema }).partial());
+      const body = await jsonBody(request, bookingBaseSchema.omit({ customer: true, customer_id: true, advance_payment: true }).extend({ customer_id: idSchema }).partial());
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("bookings").update({ ...body.data, updated_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
+      const { data, error } = await user.client.from("bookings").update({ ...body.data, updated_at: new Date().toISOString() } as any).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
       if (error?.code === "23P01" || error?.message.includes("BOOKING_TIME_CONFLICT")) return apiError("booking_conflict", "القاعة محجوزة في هذا التوقيت.", 409);
       return error ? apiError("booking_update_failed", "تعذر تحديث الحجز.", 400) : data ? apiResponse(data) : apiError("not_found", "الحجز غير موجود.", 404);
     }
     if (id && !action && method === "DELETE") {
       const { data, error } = await user.client.from("bookings").update({ status: "cancelled" }).eq("tenant_id", tenantId).eq("id", id).select("id,status").maybeSingle();
       return error ? apiError("booking_cancel_failed", "تعذر إلغاء الحجز.", 400) : data ? apiResponse(data) : apiError("not_found", "الحجز غير موجود.", 404);
+    }
+  }
+
+  if (path[0] === "expense-categories" || (path[0] === "expenses" && path[1] === "categories")) {
+    if (method === "GET") {
+      const { data, error } = await user.client.from("expense_categories").select("*").or(`tenant_id.is.null,tenant_id.eq.${tenantId}`).order("name");
+      return error ? apiError("query_failed", "تعذر تحميل تصنيفات المصروفات.", 500) : apiResponse(data);
+    }
+    if (method === "POST") {
+      const body = await jsonBody(request, z.object({ name: z.string().trim().min(1).max(100) }));
+      if ("response" in body) return body.response;
+      const { data, error } = await user.client.from("expense_categories").insert({ name: body.data.name, tenant_id: tenantId, is_default: false }).select().single();
+      if (error?.code === "23505") return apiError("category_exists", "هذا التصنيف موجود بالفعل.", 409);
+      return error ? apiError("category_create_failed", "تعذر إضافة تصنيف المصروف.", 400) : apiResponse(data, 201);
     }
   }
 
@@ -345,14 +395,14 @@ async function tenantRoute(request: Request) {
         const { data: category } = await user.admin.from("expense_categories").select("id,tenant_id").eq("id", body.data.category_id).maybeSingle();
         if (category?.tenant_id !== tenantId) return apiError("category_not_found", "تصنيف المصروف غير موجود في هذه المنشأة.", 400);
       }
-      const { data, error } = await user.client.from("expenses").insert({ ...body.data, tenant_id: tenantId, created_by: user.userId }).select().single();
+      const { data, error } = await user.client.from("expenses").insert({ ...body.data, tenant_id: tenantId, created_by: user.userId } as any).select().single();
       return error ? apiError("expense_create_failed", "تعذر تسجيل المصروف.", 400) : apiResponse(data, 201);
     }
     if (id && !idSchema.safeParse(id).success) return apiError("not_found", "المصروف غير موجود.", 404);
     if (id && method === "PUT") {
       const body = await jsonBody(request, expenseSchema.partial());
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("expenses").update(body.data).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
+      const { data, error } = await user.client.from("expenses").update(body.data as any).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
       return error ? apiError("expense_update_failed", "تعذر تحديث المصروف.", 400) : data ? apiResponse(data) : apiError("not_found", "المصروف غير موجود.", 404);
     }
     if (id && method === "DELETE") {
@@ -372,7 +422,7 @@ async function tenantRoute(request: Request) {
     if (method === "POST" && !id) {
       const body = await jsonBody(request, workerSchema);
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("workers").insert({ ...body.data, tenant_id: tenantId }).select().single();
+      const { data, error } = await user.client.from("workers").insert({ ...body.data, tenant_id: tenantId } as any).select().single();
       return error ? apiError("worker_create_failed", "تعذر إضافة العامل.", 400) : apiResponse(data, 201);
     }
     if (id && !idSchema.safeParse(id).success) return apiError("not_found", "العامل غير موجود.", 404);
@@ -383,14 +433,22 @@ async function tenantRoute(request: Request) {
     if (id && !action && method === "PUT") {
       const body = await jsonBody(request, workerSchema.partial());
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("workers").update(body.data).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
+      const { data, error } = await user.client.from("workers").update(body.data as any).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
       return error ? apiError("worker_update_failed", "تعذر تحديث بيانات العامل.", 400) : data ? apiResponse(data) : apiError("not_found", "العامل غير موجود.", 404);
+    }
+    if (id && action === "payments" && method === "GET") {
+      const { data, count, error } = await user.client.from("worker_payments").select("*", { count: "exact" }).eq("tenant_id", tenantId).eq("worker_id", id).order("payment_date", { ascending: false }).range(page.offset, page.end);
+      return error ? apiError("query_failed", "تعذر تحميل مستحقات العامل.", 500) : apiResponse({ items: data, pagination: paginationMeta(url, count, page.limit, page.offset) });
     }
     if (id && action === "payments" && method === "POST") {
       const body = await jsonBody(request, workerPaymentSchema);
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("worker_payments").insert({ ...body.data, tenant_id: tenantId, worker_id: id, created_by: user.userId }).select().single();
+      const { data, error } = await user.client.from("worker_payments").insert({ ...body.data, tenant_id: tenantId, worker_id: id, created_by: user.userId } as any).select().single();
       return error ? apiError("worker_payment_failed", "تعذر تسجيل مستحق العامل.", 400) : apiResponse(data, 201);
+    }
+    if (id && !action && method === "DELETE") {
+      const { data, error } = await user.client.from("workers").update({ status: "inactive" }).eq("tenant_id", tenantId).eq("id", id).select("id,status").maybeSingle();
+      return error ? apiError("worker_deactivate_failed", "تعذر إيقاف العامل.", 400) : data ? apiResponse(data) : apiError("not_found", "العامل غير موجود.", 404);
     }
   }
 
@@ -405,7 +463,7 @@ async function tenantRoute(request: Request) {
         if ("response" in body) return body.response;
         const quantityDelta = body.data.movement_type === "consumption" || body.data.movement_type === "waste" ? -body.data.quantity : body.data.quantity;
         const { quantity: _quantity, ...values } = body.data;
-        const { data, error } = await user.client.from("inventory_movements").insert({ ...values, quantity_delta: quantityDelta, tenant_id: tenantId, created_by: user.userId }).select().single();
+        const { data, error } = await user.client.from("inventory_movements").insert({ ...values, quantity_delta: quantityDelta, tenant_id: tenantId, created_by: user.userId } as any).select().single();
         if (error?.message.includes("INVENTORY_STOCK_CANNOT_BE_NEGATIVE")) return apiError("insufficient_stock", "الكمية المطلوبة أكبر من المخزون المتاح.", 409);
         return error ? apiError("inventory_movement_failed", "تعذر تسجيل حركة المخزون.", 400) : apiResponse(data, 201);
       }
@@ -418,8 +476,25 @@ async function tenantRoute(request: Request) {
     if (path.length === 1 && method === "POST") {
       const body = await jsonBody(request, z.object({ name: z.string().trim().min(1).max(160), unit: z.string().trim().min(1).max(30).default("unit"), unit_cost: z.number().min(0).default(0), notes: z.string().max(4000).optional() }));
       if ("response" in body) return body.response;
-      const { data, error } = await user.client.from("inventory_items").insert({ ...body.data, tenant_id: tenantId }).select().single();
+      const { data, error } = await user.client.from("inventory_items").insert({ ...body.data, tenant_id: tenantId } as any).select().single();
       return error ? apiError("inventory_create_failed", "تعذر إضافة المنتج.", 400) : apiResponse(data, 201);
+    }
+    const id = path[1];
+    if (id && id !== "movements" && idSchema.safeParse(id).success) {
+      if (method === "GET") {
+        const { data, error } = await user.client.from("inventory_items").select("*").eq("tenant_id", tenantId).eq("id", id).maybeSingle();
+        return error ? apiError("query_failed", "تعذر تحميل الصنف.", 500) : data ? apiResponse(data) : apiError("not_found", "الصنف غير موجود.", 404);
+      }
+      if (method === "PUT") {
+        const body = await jsonBody(request, z.object({ name: z.string().trim().min(1).max(160).optional(), unit: z.string().trim().min(1).max(30).optional(), unit_cost: z.number().min(0).optional(), notes: z.string().max(4000).optional(), is_active: z.boolean().optional() }));
+        if ("response" in body) return body.response;
+        const { data, error } = await user.client.from("inventory_items").update(body.data as any).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
+        return error ? apiError("inventory_update_failed", "تعذر تحديث الصنف.", 400) : data ? apiResponse(data) : apiError("not_found", "الصنف غير موجود.", 404);
+      }
+      if (method === "DELETE") {
+        const { data, error } = await user.client.from("inventory_items").update({ is_active: false }).eq("tenant_id", tenantId).eq("id", id).select("id").maybeSingle();
+        return error ? apiError("inventory_delete_failed", "تعذر إيقاف الصنف.", 400) : data ? apiResponse({ id, deleted: true }) : apiError("not_found", "الصنف غير موجود.", 404);
+      }
     }
   }
 
@@ -438,7 +513,7 @@ async function tenantRoute(request: Request) {
   if (path[0] === "device-tokens" && method === "POST") {
     const body = await jsonBody(request, z.object({ token: z.string().min(20).max(4096), device_label: z.string().max(120).optional() }));
     if ("response" in body) return body.response;
-    const { data, error } = await user.client.from("device_tokens").upsert({ tenant_id: tenantId, user_id: user.userId, provider: "fcm", token: body.data.token, device_label: body.data.device_label, last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "provider,token" }).select("id,provider,device_label,last_seen_at").maybeSingle();
+    const { data, error } = await user.client.from("device_tokens").upsert({ tenant_id: tenantId, user_id: user.userId, provider: "fcm", token: body.data.token, device_label: body.data.device_label, last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() } as any, { onConflict: "provider,token" }).select("id,provider,device_label,last_seen_at").maybeSingle();
     return error ? apiError("device_token_failed", "تعذر تسجيل هذا الجهاز.", 400) : apiResponse(data, 201);
   }
   if (path[0] === "device-tokens" && path[1] && method === "DELETE") {
@@ -465,7 +540,7 @@ async function tenantRoute(request: Request) {
     }
     const hallParam = url.searchParams.get("hall_id");
     if (hallParam && !idSchema.safeParse(hallParam).success) return apiError("invalid_hall", "معرّف القاعة غير صالح.", 400);
-    const { data, error } = await user.client.rpc("financial_report", { _tenant_id: tenantId, _start_date: startDate, _end_date: endDate, _hall_id: hallParam || null });
+    const { data, error } = await user.client.rpc("financial_report", { _tenant_id: tenantId, _start_date: startDate, _end_date: endDate, ...(hallParam ? { _hall_id: hallParam } : {}) });
     return error ? apiError("report_failed", "تعذر إعداد التقرير المالي.", 400) : apiResponse(data);
   }
 
@@ -485,7 +560,7 @@ async function tenantRoute(request: Request) {
     const { buildMonthlyExcel } = await import("@/lib/reports.server");
     try {
       const workbook = await buildMonthlyExcel(user, `${year}-${String(month).padStart(2, "0")}-01`, new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10), hallParamFromUrl(url));
-      return new Response(workbook.bytes, { status: 200, headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": `attachment; filename="qa3aty-${year}-${String(month).padStart(2, "0")}.xlsx"`, "cache-control": "private, no-store" } });
+      return new Response(workbook.bytes as unknown as BodyInit, { status: 200, headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": `attachment; filename="qa3aty-${year}-${String(month).padStart(2, "0")}.xlsx"`, "cache-control": "private, no-store" } });
     } catch {
       return apiError("export_failed", "تعذر إنشاء ملف التقرير.", 500);
     }

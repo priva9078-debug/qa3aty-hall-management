@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
-import { bootstrapSuperAdmin, getBootstrapStatus, loginWithUsername } from "@/lib/auth.functions";
+import { loginWithUsername } from "@/lib/auth.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -27,29 +27,17 @@ export const Route = createFileRoute("/")({
 function DeveloperSignIn() {
   const navigate = useNavigate();
   const login = useServerFn(loginWithUsername);
-  const bootstrap = useServerFn(bootstrapSuperAdmin);
-  const bootstrapStatus = useServerFn(getBootstrapStatus);
-  const [ready, setReady] = useState(false);
-  const [initialSetup, setInitialSetup] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState("Ahmed Elshora");
-  const [fullName, setFullName] = useState("Ahmed Elshora");
   const [password, setPassword] = useState("");
-  const [passwordConfirmation, setPasswordConfirmation] = useState("");
 
   useEffect(() => {
-    let live = true;
-    void bootstrapStatus().then((result) => {
-      if (!live) return;
-      setInitialSetup(result.state === "ready");
-      setReady(result.state !== "unavailable");
-    }).catch(() => { if (live) setReady(false); });
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session?.user) void navigate({ to: "/dashboard", replace: true });
     });
-    return () => { live = false; data.subscription.unsubscribe(); };
-  }, []);
+    return () => { data.subscription.unsubscribe(); };
+  }, [navigate]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,20 +52,6 @@ function DeveloperSignIn() {
     finally { setBusy(false); }
   }
 
-  async function handleBootstrap(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    try {
-      const result = await bootstrap({ data: { username, fullName, password, passwordConfirmation } });
-      if (!result.ok) { toast.error(result.error); return; }
-      toast.success("تم إعداد حساب المطوّر. سجّل الدخول الآن.");
-      setInitialSetup(false);
-      setPassword("");
-      setPasswordConfirmation("");
-    } catch { toast.error("تعذر إكمال التهيئة. تأكد من كلمة المرور والبيانات."); }
-    finally { setBusy(false); }
-  }
-
   return (
     <main className="qa3aty-login min-h-screen" dir="rtl">
       <div className="mx-auto grid min-h-screen w-full max-w-6xl lg:grid-cols-[1fr_0.95fr]">
@@ -88,24 +62,13 @@ function DeveloperSignIn() {
         </section>
         <section className="flex items-center justify-center px-5 py-10 sm:px-12 lg:px-16">
           <div className="w-full max-w-md">
-            <div className="mb-8"><p className="text-sm text-muted-foreground">قاعتي | Qa3aty</p><h2 className="mt-2 text-2xl font-semibold">{initialSetup ? "إعداد حساب المطوّر" : "مرحبًا بعودتك"}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{initialSetup ? "أنشئ حساب المطوّر الأول لإدارة المنصة." : "سجّل الدخول للمتابعة إلى لوحة إدارة المنصة."}</p></div>
-            {!ready ? <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">تعذر الاتصال بخدمة الحسابات. حاول التحديث بعد قليل.</div> : initialSetup ? (
-              <form onSubmit={handleBootstrap} className="space-y-5">
-                <div className="space-y-2"><Label htmlFor="owner-name">اسم المطوّر</Label><Input id="owner-name" value={fullName} onChange={(e) => setFullName(e.target.value)} required autoComplete="name"/></div>
-                <div className="space-y-2"><Label htmlFor="owner-username">اسم المستخدم</Label><Input id="owner-username" value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="username" dir="ltr"/><p className="text-xs text-muted-foreground">اسم الحساب الأول ثابت لضمان أن التهيئة تبقى للمطوّر المعيّن.</p></div>
-                <div className="space-y-2"><Label htmlFor="bootstrap-password">كلمة المرور الأولية</Label><div className="relative"><Input id="bootstrap-password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} minLength={12} autoComplete="new-password" required dir="ltr" className="pl-10"/><Button type="button" variant="ghost" size="icon" className="absolute left-1 top-1/2 size-8 -translate-y-1/2" aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="size-4"/> : <Eye className="size-4"/>}</Button></div></div>
-                <div className="space-y-2"><Label htmlFor="confirm-password">تأكيد كلمة المرور</Label><Input id="confirm-password" type={showPassword ? "text" : "password"} value={passwordConfirmation} onChange={(e) => setPasswordConfirmation(e.target.value)} minLength={12} autoComplete="new-password" required dir="ltr"/></div>
-                <div className="rounded-md border border-accent/70 bg-accent/35 p-3 text-xs leading-5 text-accent-foreground">استخدم كلمة المرور التي اخترتها وخزّنتها في إعداد الأمان. لا تُعرض كلمة المرور أو تُحفظ داخل الموقع.</div>
-                <Button type="submit" className="w-full" disabled={busy}>{busy ? "جارٍ إعداد الحساب…" : "إنشاء حساب المطوّر"}<ArrowLeft className="size-4"/></Button>
-              </form>
-            ) : (
-              <form onSubmit={handleLogin} className="space-y-5">
-                <div className="space-y-2"><Label htmlFor="username">اسم المستخدم</Label><Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="username" dir="ltr"/></div>
-                <div className="space-y-2"><div className="flex items-center justify-between"><Label htmlFor="password">كلمة المرور</Label><span className="text-xs text-muted-foreground">دخول خاص بالمطوّر</span></div><div className="relative"><Input id="password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" dir="ltr" className="pl-10"/><Button type="button" variant="ghost" size="icon" className="absolute left-1 top-1/2 size-8 -translate-y-1/2" aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="size-4"/> : <Eye className="size-4"/>}</Button></div></div>
-                <Button type="submit" className="w-full" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}<ArrowLeft className="size-4"/></Button>
-                <p className="text-center text-xs text-muted-foreground">لإعادة تعيين كلمة مرور عميل، استخدم لوحة المطوّر بعد تسجيل الدخول.</p>
-              </form>
-            )}
+            <div className="mb-8"><p className="text-sm text-muted-foreground">قاعتي | Qa3aty</p><h2 className="mt-2 text-2xl font-semibold">مرحبًا بعودتك</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">سجّل الدخول للمتابعة إلى لوحة إدارة المنصة.</p></div>
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-2"><Label htmlFor="username">اسم المستخدم</Label><Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="username" dir="ltr"/></div>
+              <div className="space-y-2"><div className="flex items-center justify-between"><Label htmlFor="password">كلمة المرور</Label><span className="text-xs text-muted-foreground">دخول خاص بالمطوّر</span></div><div className="relative"><Input id="password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" dir="ltr" className="pl-10"/><Button type="button" variant="ghost" size="icon" className="absolute left-1 top-1/2 size-8 -translate-y-1/2" aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="size-4"/> : <Eye className="size-4"/>}</Button></div></div>
+              <Button type="submit" className="w-full" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}<ArrowLeft className="size-4"/></Button>
+              <p className="text-center text-xs text-muted-foreground">لإعادة تعيين كلمة مرور عميل، استخدم لوحة المطوّر بعد تسجيل الدخول.</p>
+            </form>
             <div className="mt-10 flex items-center justify-center gap-2 text-xs text-muted-foreground"><KeyRound className="size-3.5"/> منصة قاعتي · وصول مخصص للمطوّر فقط</div>
           </div>
         </section>

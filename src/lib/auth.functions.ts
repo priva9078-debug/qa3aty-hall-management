@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
@@ -7,6 +8,7 @@ import { createTenantInputSchema, bootstrapInputSchema, loginInputSchema } from 
 
 const BOOTSTRAP_USERNAME = "ahmed.elshora";
 const USERNAME_DOMAIN = "qa3aty.internal";
+const GENERIC_SETUP_NOT_FOUND = "المسار المطلوب غير موجود أو غير متاح.";
 
 function internalEmail(username: string) {
   const normalized = username.trim().toLowerCase().replace(/\s+/g, ".");
@@ -16,33 +18,63 @@ function internalEmail(username: string) {
   return `${normalized}@${USERNAME_DOMAIN}`;
 }
 
-function checkPassword(password: string, repeatedPassword: string) {
-  const savedPassword = process.env["QA3ATY_BOOTSTRAP_PASSWORD"];
-  return Boolean(savedPassword && password === savedPassword && repeatedPassword === savedPassword);
+function constantTimeEqual(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const hashA = crypto.createHash("sha256").update(a, "utf8").digest();
+  const hashB = crypto.createHash("sha256").update(b, "utf8").digest();
+  return crypto.timingSafeEqual(hashA, hashB);
 }
 
 function asError(message: string, status = 400) {
   return { ok: false as const, error: message, status };
 }
 
-export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => bootstrapInputSchema.parse(input))
-  .handler(async ({ data }) => {
-    const request = getRequest();
-    if (!request || internalEmail(data.username).split("@")[0] !== BOOTSTRAP_USERNAME) return asError("اسم المستخدم غير متاح.");
-    if (!checkPassword(data.password, data.passwordConfirmation)) return asError("تعذر التحقق من كلمة المرور الأولية.", 403);
+async function failSetupWithDelay(): Promise<{ ok: false; error: string; status: number }> {
+  // Artificial delay to prevent timing analysis and brute-force attempts
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  return asError(GENERIC_SETUP_NOT_FOUND, 404);
+}
 
+export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
+  .validator((input: unknown) => input)
+  .handler(async ({ data: rawInput }) => {
+    // 1. Anti-enumeration: all validation or execution failures return the exact same 404 generic error
+    const parsed = bootstrapInputSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return failSetupWithDelay();
+    }
+    const data = parsed.data;
+
+    // 2. Validate one-time setup secret with constant-time comparison BEFORE touching any DB or admin client
+    const expectedSecret = process.env["QA3ATY_SETUP_SECRET"] || process.env["QA3ATY_BOOTSTRAP_PASSWORD"];
+    if (!expectedSecret || !constantTimeEqual(data.setupSecret, expectedSecret)) {
+      return failSetupWithDelay();
+    }
+
+    if (internalEmail(data.username).split("@")[0] !== BOOTSTRAP_USERNAME) {
+      return failSetupWithDelay();
+    }
+
+    // 3. ONLY after the setup secret is verified, access database admin
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // 4. Atomically check that no super_admin exists (also guaranteed by user_roles_single_super_admin_idx)
     const { data: existingRole, error: roleError } = await supabaseAdmin
       .from("user_roles")
       .select("user_id")
       .eq("role", "super_admin")
       .maybeSingle();
-    if (roleError) return asError("تعذر التحقق من حالة التهيئة.", 500);
-    if (existingRole) return asError("تم إعداد حساب المطوّر بالفعل.", 409);
-    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1 });
-    if ((authUsers.users ?? []).length > 0) return asError("توجد حسابات دخول مسبقًا. أعد المحاولة من خلال حساب المطوّر الحالي.", 409);
 
+    if (roleError || existingRole) {
+      return failSetupWithDelay();
+    }
+
+    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1 });
+    if ((authUsers?.users ?? []).length > 0) {
+      return failSetupWithDelay();
+    }
+
+    // 5. Create the developer user and call atomic bootstrap_super_admin stored procedure
     const email = internalEmail(data.username);
     const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -50,7 +82,9 @@ export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
       email_confirm: true,
       user_metadata: { account_kind: "platform_owner" },
     });
-    if (createError || !created.user) return asError("تعذر إنشاء حساب المطوّر.", 400);
+    if (createError || !created?.user) {
+      return failSetupWithDelay();
+    }
 
     const { error: profileError } = await supabaseAdmin.rpc("bootstrap_super_admin", {
       _user_id: created.user.id,
@@ -59,17 +93,11 @@ export const bootstrapSuperAdmin = createServerFn({ method: "POST" })
     });
     if (profileError) {
       await supabaseAdmin.auth.admin.deleteUser(created.user.id);
-      return asError("تعذر إكمال إعداد حساب المطوّر.", 500);
+      return failSetupWithDelay();
     }
+
     return { ok: true as const };
   });
-
-export const getBootstrapStatus = createServerFn({ method: "GET" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.from("user_roles").select("user_id").eq("role", "super_admin").maybeSingle();
-  if (error) return { state: "unavailable" as const };
-  return { state: data ? "complete" as const : "ready" as const };
-});
 
 export const loginWithUsername = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => loginInputSchema.parse(input))

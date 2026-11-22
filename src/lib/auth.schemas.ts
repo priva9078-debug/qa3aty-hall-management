@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const bootstrapInputSchema = z.object({
+  setupSecret: z.string().min(1).max(256),
   username: z.string().trim().min(3).max(32),
   fullName: z.string().trim().min(2).max(160),
   password: z.string().min(12).max(128),
