@@ -309,8 +309,7 @@ export const setTenantStatus = createServerFn({ method: "POST" })
     if (!before) return asError("العميل غير موجود.", 404);
     const { error } = await supabaseAdmin.from("tenants").update({ status: data.status }).eq("id", data.tenantId);
     if (error) return asError("تعذر تحديث حالة العميل.", 500);
-    const { data: profile } = await supabaseAdmin.from("profiles").select("user_id").eq("tenant_id", data.tenantId).maybeSingle();
-    if (profile) await supabaseAdmin.from("profiles").update({ is_active: data.status === "active" }).eq("user_id", profile.user_id);
+    await supabaseAdmin.from("profiles").update({ is_active: data.status === "active" }).eq("tenant_id", data.tenantId);
     await supabaseAdmin.from("subscription_history").insert({ tenant_id: data.tenantId, action: data.status === "active" ? "reactivated" : "suspended", actor_user_id: context.userId, details: { previous_status: before.status } });
     await supabaseAdmin.from("audit_logs").insert({ tenant_id: data.tenantId, actor_user_id: context.userId, action: `tenant.${data.status}`, entity_type: "tenant", entity_id: data.tenantId, before_data: before, after_data: { status: data.status } });
     return { ok: true as const };
@@ -323,7 +322,7 @@ export const resetTenantPassword = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: role } = await context.supabase.from("user_roles").select("role").eq("user_id", context.userId).maybeSingle();
     if (role?.role !== "super_admin") return asError("غير مصرح.", 403);
-    const { data: admin } = await supabaseAdmin.from("profiles").select("user_id").eq("tenant_id", data.tenantId).maybeSingle();
+    const { data: admin } = await supabaseAdmin.from("profiles").select("user_id").eq("tenant_id", data.tenantId).order("created_at", { ascending: true }).limit(1).maybeSingle();
     if (!admin) return asError("العميل غير موجود.", 404);
     const { error } = await supabaseAdmin.auth.admin.updateUserById(admin.user_id, { password: data.newPassword });
     if (error) return asError("تعذر إعادة تعيين كلمة المرور.", 500);
@@ -345,8 +344,7 @@ export const extendTenantSubscription = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.from("subscriptions").insert({ tenant_id: data.tenantId, plan: "custom", status: "active", starts_at: startsAt, ends_at: endsAt, price: data.price, created_by: context.userId });
     if (error) return asError("تعذر تمديد الاشتراك.", 500);
     await supabaseAdmin.from("tenants").update({ status: "active" }).eq("id", data.tenantId);
-    const { data: profile } = await supabaseAdmin.from("profiles").select("user_id").eq("tenant_id", data.tenantId).maybeSingle();
-    if (profile) await supabaseAdmin.from("profiles").update({ is_active: true }).eq("user_id", profile.user_id);
+    await supabaseAdmin.from("profiles").update({ is_active: true }).eq("tenant_id", data.tenantId);
     await supabaseAdmin.from("subscriptions").update({ status: "cancelled" }).eq("id", sub.id).eq("status", "active");
     await supabaseAdmin.from("subscription_history").insert({ tenant_id: data.tenantId, subscription_id: sub.id, action: "extended", previous_ends_at: sub.ends_at, new_ends_at: endsAt, actor_user_id: context.userId, details: { days: data.days } });
     await supabaseAdmin.from("audit_logs").insert({ tenant_id: data.tenantId, actor_user_id: context.userId, action: "subscription.extended", entity_type: "subscription", entity_id: sub.id, before_data: { ends_at: sub.ends_at }, after_data: { ends_at: endsAt, days: data.days } });

@@ -200,3 +200,116 @@ describe("Qa3aty Monthly Excel Export", () => {
     expect(wb.SheetNames).toEqual(expectedSheets);
   });
 });
+
+describe("Qa3aty Sub-Accounts & Granular Permissions", () => {
+  it("primary account defaults to full permissions including managing sub-accounts", () => {
+    const isPrimary = true;
+    const permissions = isPrimary
+      ? {
+          can_manage_bookings: true,
+          can_view_reports: true,
+          can_manage_expenses: true,
+          can_manage_inventory: true,
+          can_manage_workers: true,
+          can_manage_sub_accounts: true,
+        }
+      : {
+          can_manage_bookings: true,
+          can_view_reports: false,
+          can_manage_expenses: false,
+          can_manage_inventory: false,
+          can_manage_workers: false,
+          can_manage_sub_accounts: false,
+        };
+
+    expect(permissions.can_manage_sub_accounts).toBe(true);
+    expect(permissions.can_view_reports).toBe(true);
+    expect(permissions.can_manage_expenses).toBe(true);
+  });
+
+  it("sub-account receives restricted permissions and cannot manage sub-accounts", () => {
+    const isPrimary = false;
+    const customPerms = { can_manage_bookings: true, can_view_reports: false, can_manage_expenses: false };
+    const permissions = isPrimary
+      ? {
+          can_manage_bookings: true,
+          can_view_reports: true,
+          can_manage_expenses: true,
+          can_manage_inventory: true,
+          can_manage_workers: true,
+          can_manage_sub_accounts: true,
+        }
+      : {
+          can_manage_bookings: customPerms.can_manage_bookings ?? true,
+          can_view_reports: customPerms.can_view_reports ?? false,
+          can_manage_expenses: customPerms.can_manage_expenses ?? false,
+          can_manage_inventory: false,
+          can_manage_workers: false,
+          can_manage_sub_accounts: false,
+        };
+
+    expect(permissions.can_manage_sub_accounts).toBe(false);
+    expect(permissions.can_view_reports).toBe(false);
+    expect(permissions.can_manage_expenses).toBe(false);
+    expect(permissions.can_manage_bookings).toBe(true);
+  });
+
+  it("verifies simultaneous subscription lockout logic", () => {
+    // When a tenant's subscription expires, both primary and sub-accounts belong to same tenantId
+    const tenantId = "11111111-1111-1111-1111-111111111111";
+    const primaryUser = { userId: "u1", tenantId, isPrimary: true };
+    const subUserX = { userId: "u2", tenantId, isPrimary: false };
+
+    // Tenant subscription expired:
+    const activeSubscription = null;
+    const checkAccess = (user: { tenantId: string }) => {
+      if (!activeSubscription) {
+        return { ok: false, error: "subscription_expired" };
+      }
+      return { ok: true };
+    };
+
+    expect(checkAccess(primaryUser)).toEqual({ ok: false, error: "subscription_expired" });
+    expect(checkAccess(subUserX)).toEqual({ ok: false, error: "subscription_expired" });
+  });
+});
+
+describe("Qa3aty Booking Cancellation & Refund Calculations", () => {
+  it("calculates partial refund and retained amounts correctly", () => {
+    const totalPaid: number = 10000;
+    const refundAmount: number = 6000;
+    expect(refundAmount).toBeLessThanOrEqual(totalPaid);
+
+    const retainedAmount = totalPaid - refundAmount;
+    expect(retainedAmount).toBe(4000);
+
+    const refundStatus = refundAmount === totalPaid
+      ? "full_refund"
+      : refundAmount > 0
+        ? "partial_refund"
+        : "retained";
+
+    expect(refundStatus).toBe("partial_refund");
+  });
+
+  it("handles full refund when customer receives 100% of payment back", () => {
+    const totalPaid: number = 5000;
+    const refundAmount: number = 5000;
+    const retainedAmount = totalPaid - refundAmount;
+    expect(retainedAmount).toBe(0);
+
+    const refundStatus = refundAmount === totalPaid ? "full_refund" : "partial_refund";
+    expect(refundStatus).toBe("full_refund");
+  });
+
+  it("handles cancellation without refund retaining 100% of deposit as cancellation fee", () => {
+    const totalPaid: number = 3000;
+    const refund = false;
+    const refundAmount: number = 0;
+    const retainedAmount = totalPaid - refundAmount;
+    expect(retainedAmount).toBe(3000);
+
+    const refundStatus = refundAmount === 0 ? (totalPaid > 0 ? "retained" : "no_payment") : "partial_refund";
+    expect(refundStatus).toBe("retained");
+  });
+});

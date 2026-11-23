@@ -348,8 +348,78 @@ class ApiClient {
 ### 7.5 تعديل حجز
 - **المسار:** `PUT /bookings/:id`
 
-### 7.6 إلغاء حجز
-- **المسار:** `DELETE /bookings/:id` (يغير الحالة إلى `cancelled`)
+### 7.6 إلغاء حجز مع خيار الاسترداد المالي (Cancel Booking with Refund)
+- **المسار:** `POST /bookings/:id/cancel` (أو `DELETE /bookings/:id`)
+- **وصف العملية:**
+  - إذا لم يكن مدفوعاً أي مبالغ (`total_paid = 0`): يتم إلغاء الحجز مباشرة.
+  - إذا كان الحجز مدفوعاً بالكامل أو مدفوع عربون فقط (`total_paid > 0`): يتيح لك النظام اختيار استرداد الفلوس للعميل أو احتجازها كرسوم إلغاء، وتحديد كم سيرجع، مع تسجيل الأثر المالي فوراً في المصروفات ورصيد الحجز.
+- **جسم الطلب (Body):**
+```json
+{
+  "reason": "طلب العميل إلغاء المناسبة لظروف طارئة",
+  "refund": true,
+  "refund_amount": 3000.00,
+  "refund_method": "cash",
+  "refund_notes": "تم تسليم المبلغ نقداً بالخزينة"
+}
+```
+*ملاحظة: إذا اخترت عدم الاسترداد، أرسل `"refund": false` وسيتم احتجاز كامل المدفوع كرسوم إلغاء.*
+
+- **الاستجابة:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-booking",
+    "status": "cancelled",
+    "event_name": "زفاف أحمد وسارة",
+    "event_date": "2026-12-15",
+    "financial_summary": {
+      "total_price": 30000.00,
+      "total_paid": 5000.00,
+      "refund_amount": 3000.00,
+      "retained_amount": 2000.00,
+      "refund_status": "partial_refund"
+    },
+    "cancellation": {
+      "cancelled_at": "2026-11-23T10:00:00Z",
+      "reason": "طلب العميل إلغاء المناسبة لظروف طارئة",
+      "total_paid": 5000.00,
+      "refunded": true,
+      "refund_amount": 3000.00,
+      "retained_amount": 2000.00,
+      "refund_method": "cash",
+      "refund_status": "partial_refund",
+      "refund_notes": "تم تسليم المبلغ نقداً بالخزينة"
+    }
+  }
+}
+```
+
+- **نموذج استدعاء في Flutter (Dio):**
+```dart
+Future<Map<String, dynamic>> cancelBooking({
+  required String bookingId,
+  String? reason,
+  bool refund = false,
+  double refundAmount = 0.0,
+  String refundMethod = 'cash',
+  String? refundNotes,
+}) async {
+  final dio = ApiClient().dio;
+  final response = await dio.post(
+    '/bookings/$bookingId/cancel',
+    data: {
+      'reason': reason,
+      'refund': refund,
+      'refund_amount': refundAmount,
+      'refund_method': refundMethod,
+      'refund_notes': refundNotes,
+    },
+  );
+  return response.data['data'];
+}
+```
 
 ---
 
@@ -400,18 +470,84 @@ class ApiClient {
 
 ### 10.1 قائمة المصروفات
 - **المسار:** `GET /expenses?start_date=2026-11-01&end_date=2026-11-30&hall_id=...`
+- ترجع كل عنصر من المصروفات متضمناً `receipt_path` ورابط العرض المباشر الموقع `receipt_url` الصالح للاستعراض داخل التطبيق مباشرة عبر `Image.network(item['receipt_url'])`.
 
-### 10.2 إضافة مصروف
+### 10.2 إضافة مصروف مع إمكانية رفع صورة الإيصال والفاتورة
+يدعم الـ API طريقتين مريحتين جداً لتطبيق Flutter:
+
+#### أ. الطريقة المباشرة بـ Multipart (رفع البيانات والصورة بطلب واحد):
 - **المسار:** `POST /expenses`
-- **الطلب:**
+- **نوع المحتوى (Content-Type):** `multipart/form-data`
+- **الحقول:**
+  - `description`: وصف المصروف
+  - `amount`: المبلغ
+  - `expense_date`: تاريخ الصرف (مثلاً `2026-11-23`)
+  - `category_id`: معرف التصنيف (اختياري)
+  - `hall_id`: معرف القاعة (اختياري)
+  - `booking_id`: معرف الحجز (اختياري)
+  - `receipt`: ملف صورة الفاتورة (File / Image)
+  - `notes`: ملاحظات إضافية
+
+- **كود Flutter باستخدام Dio:**
+```dart
+Future<Map<String, dynamic>> createExpenseWithReceipt({
+  required String description,
+  required double amount,
+  required String expenseDate,
+  String? categoryId,
+  String? hallId,
+  String? filePath,
+  String? notes,
+}) async {
+  final dio = ApiClient().dio;
+
+  final formData = FormData.fromMap({
+    'description': description,
+    'amount': amount,
+    'expense_date': expenseDate,
+    if (categoryId != null) 'category_id': categoryId,
+    if (hallId != null) 'hall_id': hallId,
+    if (notes != null) 'notes': notes,
+    if (filePath != null)
+      'receipt': await MultipartFile.fromFile(
+        filePath,
+        filename: filePath.split('/').last,
+      ),
+  });
+
+  final response = await dio.post(
+    '/expenses',
+    data: formData,
+  );
+  return response.data['data']; // يحتوي على بيانات المصروف ورابط receipt_url
+}
+```
+
+#### ب. طريقة رفع الإيصال أولاً (Upload Receipt Endpoint):
+- **المسار:** `POST /expenses/upload-receipt`
+- **نوع المحتوى:** `multipart/form-data` مع حقل `file` (أو إرسال JSON يحتوي على `file_base64`).
+- **الاستجابة:**
 ```json
 {
-  "category_id": "uuid-category",
-  "description": "فاتورة كهرباء شهر نوفمبر",
-  "amount": 4200.00,
-  "expense_date": "2026-11-20",
-  "hall_id": "uuid-hall",
-  "notes": "تم السداد من الخزينة الرئيسية"
+  "success": true,
+  "data": {
+    "receipt_path": "tenants/uuid/expenses/17000000_receipt.jpg",
+    "receipt_url": "https://...signed-url-here..."
+  }
+}
+```
+ثم تمرير `receipt_path` المستلم في استدعاء `POST /expenses` العادي بصيغة JSON.
+
+### 10.3 استخراج رابط صالح محدث لصورة إيصال مصروف
+- **المسار:** `GET /expenses/:id/receipt-url`
+- **الاستجابة:**
+```json
+{
+  "success": true,
+  "data": {
+    "receipt_path": "tenants/uuid/expenses/17000000_receipt.jpg",
+    "receipt_url": "https://...signed-url..."
+  }
 }
 ```
 
@@ -539,3 +675,117 @@ Future<void> downloadMonthlyExcel(int year, int month, String savePath) async {
 | `customer_has_bookings` | لا يمكن حذف العميل لوجود حجوزات سابقة | 409 |
 | `validation_error` | خطأ في صيغة أو اكتمال البيانات المدخلة | 400 |
 | `not_found` | العنصر المطلوب غير موجود | 404 |
+| `forbidden` | لا تملك الصلاحية الكافية لتنفيذ هذا الإجراء | 403 |
+
+---
+
+## 16. إدارة الحسابات الفرعية والصلاحيات (Sub-Accounts & Permissions)
+
+تتيح هذه الواجهات للحساب الرئيسي للمنشأة (Primary Account) إنشاء وإدارة حسابات فرعية (Sub-Accounts) لموظفي القاعة، وتحديد صلاحيات دقيقة لكل موظف.
+
+### 16.1 كائن الصلاحيات (User Permissions)
+عند تسجيل الدخول أو استدعاء `/auth/me`، يرجع حقل `is_primary` وكائن `permissions`:
+```json
+{
+  "id": "uuid-here",
+  "username": "ahmed.elshora",
+  "full_name": "أحمد الشورى",
+  "role": "tenant_admin",
+  "is_primary": true,
+  "permissions": {
+    "can_manage_bookings": true,
+    "can_view_reports": true,
+    "can_manage_expenses": true,
+    "can_manage_inventory": true,
+    "can_manage_workers": true,
+    "can_manage_sub_accounts": true
+  }
+}
+```
+
+### 16.2 استعراض الحسابات الفرعية (خاص بالحساب الرئيسي)
+- **المسار:** `GET /sub-accounts`
+- **الصلاحية:** متاح فقط للحساب الرئيسي (`is_primary: true`).
+- **الاستجابة:**
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "sub-user-uuid",
+        "username": "reception.staff",
+        "full_name": "موظف الاستقبال",
+        "phone": "01000000000",
+        "is_active": true,
+        "is_primary": false,
+        "permissions": {
+          "can_manage_bookings": true,
+          "can_view_reports": false,
+          "can_manage_expenses": false,
+          "can_manage_inventory": false,
+          "can_manage_workers": false,
+          "can_manage_sub_accounts": false
+        },
+        "created_at": "2026-11-23T09:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+### 16.3 إنشاء حساب فرعي جديد
+- **المسار:** `POST /sub-accounts`
+- **جسم الطلب (Body):**
+```json
+{
+  "username": "reception.ahmed",
+  "password": "Password123!",
+  "full_name": "أحمد موظف الحجوزات",
+  "phone": "01012345678",
+  "permissions": {
+    "can_manage_bookings": true,
+    "can_view_reports": false,
+    "can_manage_expenses": false,
+    "can_manage_inventory": false,
+    "can_manage_workers": false
+  }
+}
+```
+
+### 16.4 تعديل بيانات أو صلاحيات حساب فرعي
+- **المسار:** `PATCH /sub-accounts/{id}`
+- **جسم الطلب (Body):**
+```json
+{
+  "full_name": "أحمد - مشرف عام",
+  "is_active": true,
+  "permissions": {
+    "can_manage_expenses": true,
+    "can_view_reports": false
+  }
+}
+```
+
+### 16.5 إعادة تعيين كلمة مرور حساب فرعي
+- **المسار:** `POST /sub-accounts/{id}/reset-password`
+- **جسم الطلب (Body):**
+```json
+{
+  "new_password": "NewSecurePassword123!"
+}
+```
+
+### 16.6 حذف حساب فرعي
+- **المسار:** `DELETE /sub-accounts/{id}`
+
+---
+
+## 17. قواعد التسميع الفوري والإغلاق المتزامن للاشتراك
+
+1. **الربط والتسميع الفوري (Realtime Data Sharing):**
+   - الحساب الرئيسي وكافة الحسابات الفرعية يتبعون نفس المنشأة (`tenant_id`).
+   - عند قيام أي حساب فرعي بإضافة أو تعديل حجز في أي قاعة، يظهر التعديل فوراً للحساب الرئيسي ولجميع الحسابات الفرعية الأخرى بدون أي تأخير.
+2. **الإغلاق الشامل عند انتهاء الاشتراك (Simultaneous Subscription Lockout):**
+   - فحص صلاحية الاشتراك يتم على مستوى `tenant_id`.
+   - عند انتهاء مدة اشتراك المنشأة أو إيقافها من قبل المطور، يتم إيقاف الوصول فوراً لكافة الحسابات (الرئيسي والفرعية معاً) وتُرجع الـ APIs رمز الخطأ `subscription_expired` أو `account_suspended`.

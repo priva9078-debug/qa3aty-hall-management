@@ -3,12 +3,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 
+export type SubAccountPermissions = {
+  can_manage_bookings: boolean;
+  can_view_reports: boolean;
+  can_manage_expenses: boolean;
+  can_manage_inventory: boolean;
+  can_manage_workers: boolean;
+};
+
 export type ApiUser = {
   userId: string;
   tenantId: string | null;
   username: string;
   fullName: string;
   role: "super_admin" | "tenant_admin";
+  isPrimary: boolean;
+  permissions: SubAccountPermissions & { can_manage_sub_accounts: boolean };
   client: SupabaseClient<Database>;
   admin: SupabaseClient<Database>;
 };
@@ -66,11 +76,34 @@ export async function loadUser(request: Request, requireTenant = true): Promise<
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const [{ data: profile, error: profileError }, { data: role, error: roleError }] = await Promise.all([
-      supabaseAdmin.from("profiles").select("username,full_name,tenant_id,is_active").eq("user_id", auth.user.id).maybeSingle(),
+      supabaseAdmin.from("profiles").select("*").eq("user_id", auth.user.id).maybeSingle(),
       supabaseAdmin.from("user_roles").select("role,tenant_id").eq("user_id", auth.user.id).maybeSingle(),
     ]);
     if (profileError || roleError || !profile || !role) return { response: apiError("account_unavailable", "الحساب غير مفعّل.", 403) };
     if (!profile.is_active) return { response: apiError("account_suspended", "الحساب موقوف.", 403) };
+
+    const rawProfile = profile as any;
+    const isPrimary = rawProfile.is_primary ?? true;
+    const rawPerms = rawProfile.permissions ?? {};
+
+    const permissions = isPrimary
+      ? {
+          can_manage_bookings: true,
+          can_view_reports: true,
+          can_manage_expenses: true,
+          can_manage_inventory: true,
+          can_manage_workers: true,
+          can_manage_sub_accounts: true,
+        }
+      : {
+          can_manage_bookings: rawPerms.can_manage_bookings ?? true,
+          can_view_reports: rawPerms.can_view_reports ?? false,
+          can_manage_expenses: rawPerms.can_manage_expenses ?? false,
+          can_manage_inventory: rawPerms.can_manage_inventory ?? false,
+          can_manage_workers: rawPerms.can_manage_workers ?? false,
+          can_manage_sub_accounts: false,
+        };
+
     if (role.role === "tenant_admin") {
       const tenantId = role.tenant_id ?? profile.tenant_id;
       if (!tenantId) return { response: apiError("account_unavailable", "الحساب غير مفعّل.", 403) };
@@ -80,11 +113,42 @@ export async function loadUser(request: Request, requireTenant = true): Promise<
       ]);
       if (tenant?.status !== "active") return { response: apiError("account_suspended", "الحساب موقوف.", 403) };
       if (!subscription) return { response: apiError("subscription_expired", "انتهى الاشتراك. يرجى التواصل مع المطوّر لتجديده.", 403) };
-      return { user: { userId: auth.user.id, tenantId, username: profile.username, fullName: profile.full_name, role: role.role, client, admin: supabaseAdmin } };
+      return {
+        user: {
+          userId: auth.user.id,
+          tenantId,
+          username: profile.username,
+          fullName: profile.full_name,
+          role: role.role,
+          isPrimary,
+          permissions,
+          client,
+          admin: supabaseAdmin,
+        },
+      };
     }
     if (role.role !== "super_admin") return { response: apiError("forbidden", "لا تملك صلاحية الوصول.", 403) };
     if (requireTenant) return { response: apiError("tenant_required", "هذه العملية متاحة لمدير القاعة.", 403) };
-    return { user: { userId: auth.user.id, tenantId: null, username: profile.username, fullName: profile.full_name, role: role.role, client, admin: supabaseAdmin } };
+    return {
+      user: {
+        userId: auth.user.id,
+        tenantId: null,
+        username: profile.username,
+        fullName: profile.full_name,
+        role: role.role,
+        isPrimary: true,
+        permissions: {
+          can_manage_bookings: true,
+          can_view_reports: true,
+          can_manage_expenses: true,
+          can_manage_inventory: true,
+          can_manage_workers: true,
+          can_manage_sub_accounts: true,
+        },
+        client,
+        admin: supabaseAdmin,
+      },
+    };
   } catch {
     return { response: apiError("service_unavailable", "الخدمة غير متاحة حاليًا.", 503) };
   }
