@@ -789,3 +789,62 @@ Future<void> downloadMonthlyExcel(int year, int month, String savePath) async {
 2. **الإغلاق الشامل عند انتهاء الاشتراك (Simultaneous Subscription Lockout):**
    - فحص صلاحية الاشتراك يتم على مستوى `tenant_id`.
    - عند انتهاء مدة اشتراك المنشأة أو إيقافها من قبل المطور، يتم إيقاف الوصول فوراً لكافة الحسابات (الرئيسي والفرعية معاً) وتُرجع الـ APIs رمز الخطأ `subscription_expired` أو `account_suspended`.
+
+---
+
+## 18. إشعارات الهاتف عبر Firebase Cloud Messaging
+
+يرسل الخادم تذكيرًا واحدًا صباحًا في كل يوم من الأيام الثلاثة السابقة للمناسبة (3 و2 و1 يومًا)، بشرط أن يكون الحجز مؤكدًا والرصيد لم يُسدّد بالكامل. مثال: لمناسبة يوم 20، تصل التذكيرات أيام 17 و18 و19. يُعاد فحص حالة الحجز والرصيد والاشتراك قبل الإرسال، وتُعاد محاولة الأعطال المؤقتة تلقائيًا. الإشعار يتضمن اسم العميل والقاعة وتاريخ المناسبة والرصيد المتبقي.
+
+### 18.1 تسجيل هاتف المستخدم
+
+يجب أن يطلب تطبيق Flutter إذن الإشعارات، ويحصل على رمز Firebase Messaging من الجهاز، ثم يرسله بعد تسجيل الدخول:
+
+- **المسار:** `POST /device-tokens`
+- **المصادقة:** `Authorization: Bearer <access_token>`
+- **الطلب:**
+```json
+{
+  "token": "<fcm_device_token>",
+  "device_label": "Android phone"
+}
+```
+- احفظ `data.id` من الاستجابة لاستخدامه في حذف الجهاز عند تسجيل الخروج.
+- عند تغيّر الرمز، أرسل الرمز الجديد إلى المسار نفسه.
+- **حذف الجهاز:** `DELETE /device-tokens/:id`
+
+مثال Flutter باستخدام `firebase_messaging`:
+
+```dart
+await FirebaseMessaging.instance.requestPermission();
+final token = await FirebaseMessaging.instance.getToken();
+if (token != null) {
+  final response = await api.dio.post('/device-tokens', data: {
+    'token': token,
+    'device_label': Platform.isIOS ? 'iPhone' : 'Android phone',
+  });
+  final deviceId = response.data['data']['id'];
+}
+
+FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+  await api.dio.post('/device-tokens', data: {'token': newToken});
+});
+```
+
+لإظهار التنبيهات أثناء فتح التطبيق، عالج `FirebaseMessaging.onMessage` داخل Flutter واعرض تنبيهًا محليًا؛ وعالج `FirebaseMessaging.onMessageOpenedApp` لفتح تفاصيل المناسبة عند ضغط المستخدم على التنبيه. أنشئ قناة Android باسم `qa3aty_reminders`، واضبط مفتاح APNs في مشروع Firebase لتصل الإشعارات إلى أجهزة iPhone. يجب أن يسمح المستخدم بالإشعارات من إعدادات الهاتف.
+
+### 18.2 استجابة تسجيل الجهاز
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "device-uuid",
+    "provider": "fcm",
+    "device_label": "Android phone",
+    "last_seen_at": "2026-11-23T14:00:00Z"
+  }
+}
+```
+
+إذا لم يسجل التطبيق رمز جهاز صالحًا، أو لم يمنح المستخدم إذن الإشعارات، فلن يصل تنبيه للهاتف. لا تُرسل رموز الأجهزة إلى أي طرف آخر ولا تضع مفاتيح Firebase في تطبيق Flutter.

@@ -33,3 +33,4 @@ use the editor.
 - Keep Flutter-facing endpoints in TanStack public API routes under `/api/public/v1`; this path is required so external mobile clients can reach the app without the web preview gate.
 - Keep credential mapping, privileged account provisioning, tenant authorization, and subscription checks in server-only modules; public clients receive only Supabase Auth sessions and tenant-scoped JSON.
 - Store app-owned database structure in the managed database migrations, and use database row-level policies plus composite tenant foreign keys as the final tenant-isolation boundary.
+- Deliver scheduled push reminders through an authenticated managed HTTP schedule and a TanStack public server route, keeping Firebase credentials and reminder dispatch on the server.

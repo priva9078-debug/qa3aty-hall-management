@@ -50,6 +50,13 @@
       "when": 1795336530266,
       "tag": "0006_qa3aty_reminder_queue_and_financial_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795508674396,
+      "tag": "0007_add_push_delivery_retry_state",
+      "breakpoints": true
     }
   ]
 }

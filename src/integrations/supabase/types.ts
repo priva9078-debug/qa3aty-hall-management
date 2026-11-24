@@ -689,9 +689,11 @@ export type Database = {
         Row: {
           booking_id: string | null
           created_at: string
+          dispatch_attempts: number
           id: string
           is_read: boolean
           message: string
+          next_attempt_at: string | null
           notification_type: string
           payload: Json
           read_at: string | null
@@ -705,9 +707,11 @@ export type Database = {
         Insert: {
           booking_id?: string | null
           created_at?: string
+          dispatch_attempts?: number
           id?: string
           is_read?: boolean
           message: string
+          next_attempt_at?: string | null
           notification_type?: string
           payload?: Json
           read_at?: string | null
@@ -721,9 +725,11 @@ export type Database = {
         Update: {
           booking_id?: string | null
           created_at?: string
+          dispatch_attempts?: number
           id?: string
           is_read?: boolean
           message?: string
+          next_attempt_at?: string | null
           notification_type?: string
           payload?: Json
           read_at?: string | null
