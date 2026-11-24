@@ -283,6 +283,7 @@ class ApiClient {
 
 ### 6.1 قائمة العملاء
 - **المسار:** `GET /customers?search=أحمد&limit=20&offset=0`
+*(يدعم البحث بالاسم أو برقم الهاتف الأساسي أو برقم الواتساب).*
 
 ### 6.2 إضافة عميل جديد
 - **المسار:** `POST /customers`
@@ -291,19 +292,52 @@ class ApiClient {
 {
   "full_name": "إبراهيم حسن",
   "phone": "01011112222",
+  "whatsapp_phone": "01122223333",
   "address": "القاهرة",
   "notes": "عميل VIP"
 }
 ```
-*ملاحظة: إذا كان الهاتف مسجلاً مسبقًا لنفس المنشأة، سيقوم النظام تلقائيًا بإرجاع العميل الحالي دون تكرار.*
+*ملاحظات:*
+- `phone`: رقم الهاتف الأساسي للاتصال.
+- `whatsapp_phone`: اختياري، يُسجل في حال كان لدى العميل رقم منفصل للواتساب أو رقم بديل. إذا تُرك فارغاً أو null، يمكن لتطبيق Flutter استخدام `phone` كـ رقم افتراضي للواتساب.
+- إذا كان الهاتف مسجلاً مسبقًا لنفس المنشأة، سيقوم النظام تلقائيًا بإرجاع العميل الحالي دون تكرار.
 
-### 6.3 تفاصيل عميل (تشمل سجل حجوزاته)
+### 6.3 التواصل المباشر في Flutter (اتصال وواتساب)
+```dart
+import 'package:url_launcher/url_launcher.dart';
+
+// 1. إجراء اتصال هاتفي مباشر
+Future<void> makePhoneCall(String phoneNumber) async {
+  final uri = Uri.parse('tel:$phoneNumber');
+  if (await canLaunchUrl(uri)) await launchUrl(uri);
+}
+
+// 2. فتح محادثة واتساب مباشرة
+Future<void> openWhatsApp({required String primaryPhone, String? whatsappPhone}) async {
+  final target = (whatsappPhone != null && whatsappPhone.isNotEmpty) ? whatsappPhone : primaryPhone;
+  // تنظيف الرقم من أي مسافات أو رموز، وإضافة كود الدولة (مصر 20) إن لم يكن مضافًا
+  var clean = target.replaceAll(RegExp(r'\D'), '');
+  if (clean.startsWith('0')) clean = '2$clean';
+  final uri = Uri.parse('https://wa.me/$clean');
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+```
+
+### 6.4 تفاصيل عميل (تشمل سجل حجوزاته)
 - **المسار:** `GET /customers/:id`
 
-### 6.4 تعديل عميل
+### 6.5 تعديل عميل
 - **المسار:** `PUT /customers/:id`
+```json
+{
+  "full_name": "إبراهيم حسن",
+  "phone": "01011112222",
+  "whatsapp_phone": "01122223333",
+  "address": "القاهرة - التجمع"
+}
+```
 
-### 6.5 حذف عميل
+### 6.6 حذف عميل
 - **المسار:** `DELETE /customers/:id` (يمنع الحذف في حال وجود حجوزات مرتبطة)
 
 ---

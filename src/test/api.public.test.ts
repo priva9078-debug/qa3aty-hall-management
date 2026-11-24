@@ -336,4 +336,27 @@ describe("Qa3aty Booking Cancellation & Refund Calculations", () => {
     // Picks furthest active ends_at
     expect(activeSubs[0]?.id).toBe("sub-3");
   });
+
+  it("handles customer with primary phone and separate WhatsApp number", () => {
+    const customer = {
+      full_name: "محمد الشاذلي",
+      phone: "01012345678",
+      whatsapp_phone: "01198765432",
+    };
+
+    const getWhatsAppTarget = (cust: { phone: string; whatsapp_phone?: string | null }) => {
+      return cust.whatsapp_phone && cust.whatsapp_phone.trim().length > 0
+        ? cust.whatsapp_phone
+        : cust.phone;
+    };
+
+    expect(getWhatsAppTarget(customer)).toBe("01198765432");
+
+    const customerWithoutWa = {
+      full_name: "علي محمود",
+      phone: "01234567890",
+      whatsapp_phone: null,
+    };
+    expect(getWhatsAppTarget(customerWithoutWa)).toBe("01234567890");
+  });
 });

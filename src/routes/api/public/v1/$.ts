@@ -14,7 +14,13 @@ const hallSchema = z.object({
   capacity: z.number().int().positive().nullable().optional(), contact_phone: z.string().max(40).optional(),
   default_booking_price: z.number().min(0).max(999_999_999_999).optional(), image_path: z.string().max(500).optional(), is_active: z.boolean().optional(),
 });
-const customerSchema = z.object({ full_name: z.string().trim().min(2).max(160), phone: z.string().trim().min(3).max(40), address: z.string().max(500).optional(), notes: z.string().max(4000).optional() });
+const customerSchema = z.object({
+  full_name: z.string().trim().min(2).max(160),
+  phone: z.string().trim().min(3).max(40),
+  whatsapp_phone: z.string().trim().min(3).max(40).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
+  notes: z.string().max(4000).optional().nullable(),
+});
 const bookingBaseSchema = z.object({
   hall_id: idSchema,
   customer_id: idSchema.optional(),
@@ -509,7 +515,7 @@ async function tenantRoute(request: Request) {
     if (method === "GET" && !id) {
       let query = user.client.from("customers").select("*", { count: "exact" }).eq("tenant_id", tenantId).order("created_at", { ascending: false });
       const search = url.searchParams.get("search")?.trim();
-      if (search) query = query.or(`full_name.ilike.%${search.replace(/[%_,()]/g, " ")}%,phone.ilike.%${search.replace(/[%_,()]/g, " ")}%`);
+      if (search) query = query.or(`full_name.ilike.%${search.replace(/[%_,()]/g, " ")}%,phone.ilike.%${search.replace(/[%_,()]/g, " ")}%,whatsapp_phone.ilike.%${search.replace(/[%_,()]/g, " ")}%`);
       const { data, count, error } = await query.range(page.offset, page.end);
       if (error) return apiError("query_failed", "تعذر تحميل العملاء.", 500);
       return apiResponse({ items: data, pagination: paginationMeta(url, count, page.limit, page.offset) });
@@ -518,9 +524,12 @@ async function tenantRoute(request: Request) {
       const body = await jsonBody(request, customerSchema);
       if ("response" in body) return body.response;
       const phone = normalizePhone(body.data.phone);
+      const whatsapp_phone = body.data.whatsapp_phone ? normalizePhone(body.data.whatsapp_phone) : null;
       const { data: existing } = await user.client.from("customers").select("*").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
       if (existing) return apiResponse({ ...existing, reused_existing: true });
-      const { data, error } = await user.client.from("customers").insert({ ...body.data, phone, tenant_id: tenantId } as any).select().single();
+      const insertPayload: Record<string, unknown> = { ...body.data, phone, tenant_id: tenantId };
+      if (whatsapp_phone) insertPayload["whatsapp_phone"] = whatsapp_phone;
+      const { data, error } = await user.client.from("customers").insert(insertPayload as any).select().single();
       if (error?.code === "23505") {
         const { data: raced } = await user.client.from("customers").select("*").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
         if (raced) return apiResponse({ ...raced, reused_existing: true });
@@ -536,7 +545,11 @@ async function tenantRoute(request: Request) {
     if (id && method === "PUT") {
       const body = await jsonBody(request, customerSchema.partial());
       if ("response" in body) return body.response;
-      const values = body.data.phone ? { ...body.data, phone: normalizePhone(body.data.phone) } : body.data;
+      const values: Record<string, unknown> = { ...body.data };
+      if (body.data.phone) values["phone"] = normalizePhone(body.data.phone);
+      if (body.data.whatsapp_phone !== undefined) {
+        values["whatsapp_phone"] = body.data.whatsapp_phone ? normalizePhone(body.data.whatsapp_phone) : null;
+      }
       const { data, error } = await user.client.from("customers").update(values as any).eq("tenant_id", tenantId).eq("id", id).select().maybeSingle();
       if (error) return apiError("customer_update_failed", error.code === "23505" ? "رقم الهاتف مسجل لعميل آخر." : "تعذر تحديث بيانات العميل.", 400);
       return data ? apiResponse(data) : apiError("not_found", "العميل غير موجود.", 404);
@@ -594,10 +607,13 @@ async function tenantRoute(request: Request) {
       if (!customerId && body.data.customer) {
         const customer = body.data.customer;
         const phone = normalizePhone(customer.phone);
+        const whatsapp_phone = customer.whatsapp_phone ? normalizePhone(customer.whatsapp_phone) : null;
         const { data: existing } = await user.client.from("customers").select("id").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
         customerId = existing?.id;
         if (!customerId) {
-          const { data: createdCustomer, error: customerError } = await user.client.from("customers").insert({ ...customer, phone, tenant_id: tenantId } as any).select("id").single();
+          const custPayload: Record<string, unknown> = { ...customer, phone, tenant_id: tenantId };
+          if (whatsapp_phone) custPayload["whatsapp_phone"] = whatsapp_phone;
+          const { data: createdCustomer, error: customerError } = await user.client.from("customers").insert(custPayload as any).select("id").single();
           if (customerError?.code === "23505") {
             const { data: raced } = await user.client.from("customers").select("id").eq("tenant_id", tenantId).eq("phone", phone).maybeSingle();
             customerId = raced?.id;
