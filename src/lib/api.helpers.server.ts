@@ -109,7 +109,15 @@ export async function loadUser(request: Request, requireTenant = true): Promise<
       if (!tenantId) return { response: apiError("account_unavailable", "الحساب غير مفعّل.", 403) };
       const [{ data: tenant }, { data: subscription }] = await Promise.all([
         supabaseAdmin.from("tenants").select("status").eq("id", tenantId).maybeSingle(),
-        supabaseAdmin.from("subscriptions").select("id").eq("tenant_id", tenantId).eq("status", "active").lte("starts_at", new Date().toISOString()).gt("ends_at", new Date().toISOString()).limit(1).maybeSingle(),
+        supabaseAdmin
+          .from("subscriptions")
+          .select("id, ends_at, status")
+          .eq("tenant_id", tenantId)
+          .eq("status", "active")
+          .gt("ends_at", new Date().toISOString())
+          .order("ends_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
       if (tenant?.status !== "active") return { response: apiError("account_suspended", "الحساب موقوف.", 403) };
       if (!subscription) return { response: apiError("subscription_expired", "انتهى الاشتراك. يرجى التواصل مع المطوّر لتجديده.", 403) };

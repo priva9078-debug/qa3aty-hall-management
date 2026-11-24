@@ -149,7 +149,7 @@ async function authRoute(request: Request, method: string, action: string) {
     if ("response" in body) return body.response;
     let client;
     try { client = createPublicClient(); } catch { return apiError("service_unavailable", "خدمة الدخول غير متاحة.", 503); }
-    const { data, error } = await client.auth.refreshSession({ refresh_token: body.data.refresh_token });
+    const { data, error } = await client.auth.refreshSession({ refresh_token: body.data.refresh_token.trim() });
     if (error || !data.session) return apiError("invalid_refresh_token", "انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
     const loaded = await loadUser(bearerRequest(request, data.session.access_token), false);
     if ("response" in loaded) return loaded.response;

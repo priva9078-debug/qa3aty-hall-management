@@ -53,10 +53,12 @@ class ApiClient {
   );
 
   final FlutterSecureStorage storage = const FlutterSecureStorage();
+  bool _isRefreshing = false;
 
   ApiClient() {
+    // نستخدم QueuedInterceptorsWrapper لمنع تضارب طلبات التجديد المتزامنة
     dio.interceptors.add(
-      InterceptorsWrapper(
+      QueuedInterceptorsWrapper(
         onRequest: (options, handler) async {
           final token = await storage.read(key: 'access_token');
           if (token != null && !options.path.contains('/auth/login') && !options.path.contains('/auth/refresh')) {
@@ -65,7 +67,7 @@ class ApiClient {
           return handler.next(options);
         },
         onError: (DioException error, handler) async {
-          // تجديد التوكن تلقائيًا عند انتهاء صلاحية الجلسة
+          // تجديد التوكن تلقائيًا عند انتهاء صلاحية الـ access_token (401)
           if (error.response?.statusCode == 401 && !error.requestOptions.path.contains('/auth/')) {
             final refreshed = await refreshToken();
             if (refreshed) {
@@ -82,13 +84,17 @@ class ApiClient {
   }
 
   Future<bool> refreshToken() async {
+    if (_isRefreshing) return false;
+    _isRefreshing = true;
     try {
       final refreshToken = await storage.read(key: 'refresh_token');
       if (refreshToken == null) return false;
 
-      final response = await dio.post(
+      // إنشاء عميل منفصل لتفادي حلقة الاعتراضات أثناء التجديد
+      final refreshDio = Dio(BaseOptions(baseUrl: dio.options.baseUrl));
+      final response = await refreshDio.post(
         '/auth/refresh',
-        data: {'refresh_token': refreshToken},
+        data: {'refresh_token': refreshToken.trim()},
       );
 
       if (response.statusCode == 200 && response.data['success'] == true) {
@@ -97,7 +103,13 @@ class ApiClient {
         await storage.write(key: 'refresh_token', value: data['refresh_token']);
         return true;
       }
-    } catch (_) {}
+    } catch (_) {
+      // إذا فشل التجديد بسبب انتهاء صلاحية refresh_token
+      await storage.delete(key: 'access_token');
+      await storage.delete(key: 'refresh_token');
+    } finally {
+      _isRefreshing = false;
+    }
     return false;
   }
 }

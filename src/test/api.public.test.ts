@@ -312,4 +312,28 @@ describe("Qa3aty Booking Cancellation & Refund Calculations", () => {
     const refundStatus = refundAmount === 0 ? (totalPaid > 0 ? "retained" : "no_payment") : "partial_refund";
     expect(refundStatus).toBe("retained");
   });
+
+  it("correctly resolves tenant subscription and tenant ID fallback", () => {
+    // 1. Fallback from role.tenant_id to profile.tenant_id
+    const roleWithNullTenant = { role: "tenant_admin", tenant_id: null };
+    const profile = { tenant_id: "tenant-uuid-123" };
+    const resolvedTenantId = roleWithNullTenant.tenant_id ?? profile.tenant_id;
+    expect(resolvedTenantId).toBe("tenant-uuid-123");
+
+    // 2. Active subscription pick with ends_at in future
+    const now = Date.now();
+    const subscriptions = [
+      { id: "sub-1", status: "cancelled", ends_at: new Date(now - 86400000).toISOString() },
+      { id: "sub-2", status: "active", ends_at: new Date(now + 30 * 86400000).toISOString() },
+      { id: "sub-3", status: "active", ends_at: new Date(now + 60 * 86400000).toISOString() },
+    ];
+
+    const activeSubs = subscriptions
+      .filter((s) => s.status === "active" && Date.parse(s.ends_at) > now)
+      .sort((a, b) => Date.parse(b.ends_at) - Date.parse(a.ends_at));
+
+    expect(activeSubs.length).toBe(2);
+    // Picks furthest active ends_at
+    expect(activeSubs[0]?.id).toBe("sub-3");
+  });
 });

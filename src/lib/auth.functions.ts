@@ -141,16 +141,23 @@ export const loginWithUsername = createServerFn({ method: "POST" })
       return asError("هذا الحساب موقوف. يرجى التواصل مع المطوّر.", 403);
     }
     if (role.role === "tenant_admin") {
-      const { data: tenant } = await supabaseAdmin.from("tenants").select("status").eq("id", role.tenant_id ?? "").maybeSingle();
-      const { data: subscription } = await supabaseAdmin
-        .from("subscriptions")
-        .select("ends_at, status")
-        .eq("tenant_id", role.tenant_id ?? "")
-        .eq("status", "active")
-        .gte("ends_at", new Date().toISOString())
-        .order("ends_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const tenantId = role.tenant_id ?? profile.tenant_id;
+      if (!tenantId) {
+        await client.auth.signOut();
+        return asError("تعذر التحقق من حساب القاعة.", 403);
+      }
+      const [{ data: tenant }, { data: subscription }] = await Promise.all([
+        supabaseAdmin.from("tenants").select("status").eq("id", tenantId).maybeSingle(),
+        supabaseAdmin
+          .from("subscriptions")
+          .select("ends_at, status")
+          .eq("tenant_id", tenantId)
+          .eq("status", "active")
+          .gte("ends_at", new Date().toISOString())
+          .order("ends_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
       if (tenant?.status !== "active") {
         await client.auth.signOut();
         return asError("هذا الحساب موقوف. يرجى التواصل مع المطوّر.", 403);
@@ -186,13 +193,23 @@ export const refreshUsernameSession = createServerFn({ method: "POST" })
     const { data: refreshed, error } = await client.auth.refreshSession({ refresh_token: data.refreshToken });
     if (error || !refreshed.session || !refreshed.user) return asError("انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: profile } = await supabaseAdmin.from("profiles").select("username,full_name,is_active").eq("user_id", refreshed.user.id).maybeSingle();
+    const { data: profile } = await supabaseAdmin.from("profiles").select("username,full_name,tenant_id,is_active").eq("user_id", refreshed.user.id).maybeSingle();
     const { data: role } = await supabaseAdmin.from("user_roles").select("role,tenant_id").eq("user_id", refreshed.user.id).maybeSingle();
     if (!profile?.is_active || !role) return asError("هذا الحساب غير نشط.", 403);
     if (role.role === "tenant_admin") {
+      const tenantId = role.tenant_id ?? profile.tenant_id;
+      if (!tenantId) return asError("تعذر التحقق من حساب القاعة.", 403);
       const [{ data: tenant }, { data: subscription }] = await Promise.all([
-        supabaseAdmin.from("tenants").select("status").eq("id", role.tenant_id ?? "").maybeSingle(),
-        supabaseAdmin.from("subscriptions").select("ends_at").eq("tenant_id", role.tenant_id ?? "").eq("status", "active").gte("ends_at", new Date().toISOString()).limit(1).maybeSingle(),
+        supabaseAdmin.from("tenants").select("status").eq("id", tenantId).maybeSingle(),
+        supabaseAdmin
+          .from("subscriptions")
+          .select("ends_at")
+          .eq("tenant_id", tenantId)
+          .eq("status", "active")
+          .gte("ends_at", new Date().toISOString())
+          .order("ends_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
       if (tenant?.status !== "active") return asError("هذا الحساب موقوف.", 403);
       if (!subscription) return asError("انتهى الاشتراك.", 403);
@@ -339,8 +356,9 @@ export const extendTenantSubscription = createServerFn({ method: "POST" })
     if (role?.role !== "super_admin") return asError("غير مصرح.", 403);
     const { data: sub } = await supabaseAdmin.from("subscriptions").select("id,ends_at,status,plan").eq("tenant_id", data.tenantId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
     if (!sub) return asError("لا يوجد اشتراك للعميل.", 404);
-    const startsAt = new Date(Math.max(Date.now(), Date.parse(sub.ends_at))).toISOString();
-    const endsAt = new Date(Date.parse(startsAt) + data.days * 86400_000).toISOString();
+    const startsAt = new Date().toISOString();
+    const currentExpiry = Math.max(Date.now(), Date.parse(sub.ends_at));
+    const endsAt = new Date(currentExpiry + data.days * 86400_000).toISOString();
     const { error } = await supabaseAdmin.from("subscriptions").insert({ tenant_id: data.tenantId, plan: "custom", status: "active", starts_at: startsAt, ends_at: endsAt, price: data.price, created_by: context.userId });
     if (error) return asError("تعذر تمديد الاشتراك.", 500);
     await supabaseAdmin.from("tenants").update({ status: "active" }).eq("id", data.tenantId);
