@@ -72,7 +72,13 @@ export async function loadUser(request: Request, requireTenant = true): Promise<
   try {
     const client = createPublicClient(token);
     const { data: auth, error: authError } = await client.auth.getUser(token);
-    if (authError || !auth.user) return { response: apiError("invalid_token", "جلسة الدخول غير صالحة.", 401) };
+    if (authError || !auth.user) {
+      const errorDetails = `${authError?.message ?? ""} ${authError?.code ?? ""}`.toLowerCase();
+      if (errorDetails.includes("expired") || errorDetails.includes("bad_jwt")) {
+        return { response: apiError("token_expired", "انتهت صلاحية الجلسة.", 401) };
+      }
+      return { response: apiError("invalid_token", "جلسة الدخول غير صالحة.", 401) };
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const [{ data: profile, error: profileError }, { data: role, error: roleError }] = await Promise.all([
@@ -157,7 +163,8 @@ export async function loadUser(request: Request, requireTenant = true): Promise<
         admin: supabaseAdmin,
       },
     };
-  } catch {
+  } catch (e) {
+    console.error("loadUser failed:", e);
     return { response: apiError("service_unavailable", "الخدمة غير متاحة حاليًا.", 503) };
   }
 }

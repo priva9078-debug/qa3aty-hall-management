@@ -1,1 +1,4 @@
 project_id = "mdpcdcgrsrllvckatrmm"
+
+[auth]
+jwt_expiry = 604800

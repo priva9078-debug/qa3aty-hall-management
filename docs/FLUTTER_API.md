@@ -137,6 +137,7 @@ class ApiClient {
     "access_token": "eyJhbGciOi...",
     "refresh_token": "def5020...",
     "expires_at": 1732500000,
+    "expires_in": 3600,
     "token_type": "bearer",
     "user": {
       "id": "c76b9e22-8318-47bc-9269-e970bcfb8b79",
@@ -156,6 +157,20 @@ class ApiClient {
   "refresh_token": "def5020..."
 }
 ```
+- **الاستجابة الناجحة (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "eyJhbGciOi...",
+    "refresh_token": "new-def5020...",
+    "expires_at": 1732503600,
+    "expires_in": 3600,
+    "token_type": "bearer"
+  }
+}
+```
+- يتغير `refresh_token` مع كل عملية تجديد ناجحة؛ احفظ القيمة الجديدة فورًا واستبدل بها القديمة، لأن استخدام الرمز القديم لاحقًا قد يفشل.
 
 ### 3.3 تسجيل الخروج (Logout)
 - **المسار:** `POST /auth/logout`
@@ -187,6 +202,7 @@ class ApiClient {
   "new_password": "NewStrongPassword456!"
 }
 ```
+- تتضمن الاستجابة الناجحة `expires_in` بجانب `expires_at` مع رموز الجلسة الجديدة.
 
 ---
 
@@ -712,7 +728,8 @@ Future<void> downloadMonthlyExcel(int year, int month, String savePath) async {
 | رمز الخطأ `code` | المعنى | رمز HTTP |
 |---|---|---|
 | `unauthorized` | يلزم تسجيل الدخول أو إرسال توكن صالح | 401 |
-| `invalid_token` | التوكن غير صالح أو منتهي الصلاحية | 401 |
+| `token_expired` | انتهت صلاحية الجلسة؛ جدّدها باستخدام `refresh_token` | 401 |
+| `invalid_token` | التوكن غير صالح | 401 |
 | `account_suspended` | حساب المنشأة موقوف من قبل المطور | 403 |
 | `subscription_expired` | انتهى اشتراك المنشأة (يرجى التجديد) | 403 |
 | `booking_conflict` | القاعة محجوزة بالفعل في هذا التوقيت | 409 |

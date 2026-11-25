@@ -138,6 +138,7 @@ async function authRoute(request: Request, method: string, action: string) {
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,
       expires_at: data.session.expires_at,
+      expires_in: data.session.expires_in,
       token_type: data.session.token_type,
       user: {
         id: loaded.user.userId,
@@ -164,6 +165,7 @@ async function authRoute(request: Request, method: string, action: string) {
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,
       expires_at: data.session.expires_at,
+      expires_in: data.session.expires_in,
       token_type: data.session.token_type,
       user: {
         id: loaded.user.userId,
@@ -210,7 +212,7 @@ async function authRoute(request: Request, method: string, action: string) {
     if (loginError || login.user?.id !== loaded.user.userId || !login.session) return apiError("current_password_invalid", "كلمة المرور الحالية غير صحيحة.", 400);
     const { error } = await client.auth.updateUser({ password: body.data.new_password });
     if (error) return apiError("password_update_failed", "تعذر تغيير كلمة المرور.", 400);
-    return apiResponse({ password_changed: true, access_token: login.session.access_token, refresh_token: login.session.refresh_token, expires_at: login.session.expires_at });
+    return apiResponse({ password_changed: true, access_token: login.session.access_token, refresh_token: login.session.refresh_token, expires_at: login.session.expires_at, expires_in: login.session.expires_in });
   }
 
   return apiError("not_found", "المسار غير موجود.", 404);
