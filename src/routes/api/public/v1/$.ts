@@ -3,12 +3,22 @@ import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { apiError, apiResponse, createPublicClient, loadUser, normalizeUsername, pagination, paginationMeta, requestJson } from "@/lib/api.helpers.server";
+import {
+  ACCESS_TOKEN_DEFAULT_TTL_SECONDS,
+  createRefreshSession,
+  getRefreshSession,
+  parseRefreshToken,
+  revokeAllUserSessions,
+  revokeSession,
+  revokeSessionByToken,
+  rotateRefreshSession,
+} from "@/lib/session.server";
 
 const idSchema = z.string().uuid();
 const pageSize = 100;
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const loginSchema = z.object({ username: z.string().trim().min(3).max(32), password: z.string().min(1).max(128) });
-const refreshSchema = z.object({ refresh_token: z.string().min(20).max(4096) });
+const refreshSchema = z.object({ refresh_token: z.string().trim().min(1).max(4096) });
 const hallSchema = z.object({
   name: z.string().trim().min(2).max(160), description: z.string().max(4000).optional(), address: z.string().max(500).optional(),
   capacity: z.number().int().positive().nullable().optional(), contact_phone: z.string().max(40).optional(),
@@ -134,11 +144,21 @@ async function authRoute(request: Request, method: string, action: string) {
       if ("response" in loaded) return loaded.response;
       return apiError("forbidden", "هذا الحساب غير مخصص لتطبيق إدارة القاعات.", 403);
     }
+    const refreshSession = await createRefreshSession({
+      userId: loaded.user.userId,
+      tenantId: loaded.user.tenantId,
+      supabaseRefreshToken: data.session.refresh_token,
+    });
+
+    const accessExpiresAt = data.session.expires_at ?? (Math.floor(Date.now() / 1000) + ACCESS_TOKEN_DEFAULT_TTL_SECONDS);
+    const accessExpiresIn = data.session.expires_in ?? Math.max(0, accessExpiresAt - Math.floor(Date.now() / 1000));
+
     return apiResponse({
       access_token: data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_at: data.session.expires_at,
-      token_type: data.session.token_type,
+      refresh_token: refreshSession.refreshToken,
+      expires_at: accessExpiresAt,
+      expires_in: accessExpiresIn,
+      token_type: "bearer",
       user: {
         id: loaded.user.userId,
         username: loaded.user.username,
@@ -153,18 +173,93 @@ async function authRoute(request: Request, method: string, action: string) {
   if (action === "refresh" && method === "POST") {
     const body = await jsonBody(request, refreshSchema);
     if ("response" in body) return body.response;
+    const rawToken = body.data.refresh_token.trim();
+
+    const parsed = parseRefreshToken(rawToken);
+    if (!parsed) {
+      return apiError("invalid_refresh_token", "انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
+    }
+
+    const session = await getRefreshSession(parsed.sessionId, parsed.userId);
+    if (!session || session.isRevoked) {
+      if (session?.isRevoked) {
+        return apiError("invalid_refresh_token", "تم إلغاء الجلسة. سجّل الدخول مجددًا.", 401);
+      }
+      return apiError("invalid_refresh_token", "انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    if (now >= session.expiresAt) {
+      await revokeSession(session.sessionId, "expired", session.userId);
+      return apiError("invalid_refresh_token", "انتهت صلاحية جلسة الدخول بعد 30 يومًا من عدم الاستخدام.", 401);
+    }
+
     let client;
     try { client = createPublicClient(); } catch { return apiError("service_unavailable", "خدمة الدخول غير متاحة.", 503); }
-    const { data, error } = await client.auth.refreshSession({ refresh_token: body.data.refresh_token.trim() });
-    if (error || !data.session) return apiError("invalid_refresh_token", "انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
-    const loaded = await loadUser(bearerRequest(request, data.session.access_token), false);
-    if ("response" in loaded) return loaded.response;
-    if (loaded.user.role !== "tenant_admin") return apiError("forbidden", "هذا الحساب غير مخصص لتطبيق إدارة القاعات.", 403);
+
+    let newAccessToken = "";
+    let newSupabaseRefreshToken = session.supabaseRefreshToken;
+    let accessExpiresAt = now + ACCESS_TOKEN_DEFAULT_TTL_SECONDS;
+    let accessExpiresIn = ACCESS_TOKEN_DEFAULT_TTL_SECONDS;
+
+    // 1. Try refreshing via Supabase GoTrue with the stored underlying token
+    const { data: refreshed, error: refreshErr } = await client.auth.refreshSession({ refresh_token: session.supabaseRefreshToken });
+    if (!refreshErr && refreshed?.session) {
+      newAccessToken = refreshed.session.access_token;
+      newSupabaseRefreshToken = refreshed.session.refresh_token;
+      accessExpiresAt = refreshed.session.expires_at ?? (now + ACCESS_TOKEN_DEFAULT_TTL_SECONDS);
+      accessExpiresIn = refreshed.session.expires_in ?? Math.max(0, accessExpiresAt - now);
+    } else {
+      // 2. Fallback: Authenticate via admin-verified magic link
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: profile } = await supabaseAdmin.from("profiles").select("username").eq("user_id", session.userId).maybeSingle();
+      if (!profile?.username) {
+        return apiError("invalid_refresh_token", "تعذر التحقق من الحساب.", 401);
+      }
+      const email = emailForUsername(profile.username);
+      if (!email) {
+        return apiError("invalid_refresh_token", "بيانات الحساب غير صالحة.", 401);
+      }
+      const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({ type: "magiclink", email });
+      if (linkErr || !linkData?.properties?.email_otp) {
+        return apiError("invalid_refresh_token", "انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
+      }
+      const { data: otpData, error: otpErr } = await client.auth.verifyOtp({ email, token: linkData.properties.email_otp, type: "magiclink" });
+      if (otpErr || !otpData?.session) {
+        return apiError("invalid_refresh_token", "انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
+      }
+      newAccessToken = otpData.session.access_token;
+      newSupabaseRefreshToken = otpData.session.refresh_token;
+      accessExpiresAt = otpData.session.expires_at ?? (now + ACCESS_TOKEN_DEFAULT_TTL_SECONDS);
+      accessExpiresIn = otpData.session.expires_in ?? Math.max(0, accessExpiresAt - now);
+    }
+
+    // 3. Verify user status and active subscription
+    const loaded = await loadUser(bearerRequest(request, newAccessToken), false);
+    if ("response" in loaded) {
+      await revokeSession(session.sessionId, "account_ineligible", session.userId);
+      return loaded.response;
+    }
+    if (loaded.user.role !== "tenant_admin") {
+      await revokeSession(session.sessionId, "forbidden_role", session.userId);
+      return apiError("forbidden", "هذا الحساب غير مخصص لتطبيق إدارة القاعات.", 403);
+    }
+
+    // 4. Rotate the refresh token and slide expiration 30 days
+    const rotated = await rotateRefreshSession(rawToken, newSupabaseRefreshToken);
+    if (!rotated.ok) {
+      if (rotated.error === "reuse_detected") {
+        return apiError("invalid_refresh_token", "تم إلغاء الجلسة لأسباب أمنية. سجّل الدخول مجددًا.", 401);
+      }
+      return apiError("invalid_refresh_token", "انتهت جلسة الدخول. سجّل الدخول مجددًا.", 401);
+    }
+
     return apiResponse({
-      access_token: data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_at: data.session.expires_at,
-      token_type: data.session.token_type,
+      access_token: newAccessToken,
+      refresh_token: rotated.newRefreshToken,
+      expires_at: accessExpiresAt,
+      expires_in: accessExpiresIn,
+      token_type: "bearer",
       user: {
         id: loaded.user.userId,
         username: loaded.user.username,
@@ -180,6 +275,13 @@ async function authRoute(request: Request, method: string, action: string) {
     const loaded = await loadUser(request, false);
     if ("response" in loaded) return loaded.response;
     const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+    const body = await requestJson(request).catch(() => null);
+    const refreshToken = typeof (body as any)?.refresh_token === "string" ? (body as any).refresh_token.trim() : null;
+    if (refreshToken) {
+      await revokeSessionByToken(refreshToken, "logout");
+    } else {
+      await revokeAllUserSessions(loaded.user.userId, "logout");
+    }
     await loaded.user.admin.auth.admin.signOut(token, "local");
     return apiResponse({ logged_out: true });
   }
@@ -210,7 +312,28 @@ async function authRoute(request: Request, method: string, action: string) {
     if (loginError || login.user?.id !== loaded.user.userId || !login.session) return apiError("current_password_invalid", "كلمة المرور الحالية غير صحيحة.", 400);
     const { error } = await client.auth.updateUser({ password: body.data.new_password });
     if (error) return apiError("password_update_failed", "تعذر تغيير كلمة المرور.", 400);
-    return apiResponse({ password_changed: true, access_token: login.session.access_token, refresh_token: login.session.refresh_token, expires_at: login.session.expires_at });
+
+    // Invalidate all active refresh sessions for this user upon password change
+    await revokeAllUserSessions(loaded.user.userId, "password_changed");
+
+    // Create a fresh refresh session for the current authenticated device
+    const refreshSession = await createRefreshSession({
+      userId: loaded.user.userId,
+      tenantId: loaded.user.tenantId,
+      supabaseRefreshToken: login.session.refresh_token,
+    });
+
+    const accessExpiresAt = login.session.expires_at ?? (Math.floor(Date.now() / 1000) + ACCESS_TOKEN_DEFAULT_TTL_SECONDS);
+    const accessExpiresIn = login.session.expires_in ?? Math.max(0, accessExpiresAt - Math.floor(Date.now() / 1000));
+
+    return apiResponse({
+      password_changed: true,
+      access_token: login.session.access_token,
+      refresh_token: refreshSession.refreshToken,
+      expires_at: accessExpiresAt,
+      expires_in: accessExpiresIn,
+      token_type: "bearer",
+    });
   }
 
   return apiError("not_found", "المسار غير موجود.", 404);
@@ -441,6 +564,10 @@ async function tenantRoute(request: Request) {
 
       if (updateError) return apiError("update_failed", "تعذر تحديث بيانات الحساب الفرعي.", 400);
 
+      if (body.data.is_active === false) {
+        await revokeAllUserSessions(id, "sub_account_deactivated");
+      }
+
       return apiResponse({
         id: (updated as any).user_id,
         username: (updated as any).username,
@@ -461,12 +588,14 @@ async function tenantRoute(request: Request) {
 
       const { error: passError } = await user.admin.auth.admin.updateUserById(id, { password: body.data.new_password });
       if (passError) return apiError("password_reset_failed", "تعذر إعادة تعيين كلمة المرور.", 400);
+      await revokeAllUserSessions(id, "sub_account_password_reset");
       return apiResponse({ password_reset: true });
     }
 
     if (id && method === "DELETE") {
       const { error: delError } = await user.admin.auth.admin.deleteUser(id);
       if (delError) return apiError("delete_failed", "تعذر حذف الحساب الفرعي.", 400);
+      await revokeAllUserSessions(id, "sub_account_deleted");
       return apiResponse({ id, deleted: true });
     }
   }

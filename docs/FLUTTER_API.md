@@ -135,32 +135,70 @@ class ApiClient {
   "success": true,
   "data": {
     "access_token": "eyJhbGciOi...",
-    "refresh_token": "def5020...",
-    "expires_at": 1732500000,
+    "refresh_token": "qrt_eyJ1c2VySWQiOi...",
+    "expires_at": 1732798800,
+    "expires_in": 3600,
     "token_type": "bearer",
     "user": {
       "id": "c76b9e22-8318-47bc-9269-e970bcfb8b79",
       "username": "hall_owner",
       "full_name": "أحمد السعيد",
-      "role": "tenant_admin"
+      "role": "tenant_admin",
+      "is_primary": true,
+      "permissions": {
+        "can_manage_bookings": true,
+        "can_view_reports": true,
+        "can_manage_expenses": true,
+        "can_manage_inventory": true,
+        "can_manage_workers": true,
+        "can_manage_sub_accounts": true
+      }
     }
   }
 }
 ```
+*ملاحظات هامة حول الحقول:*
+- `expires_at`: توقيت انتهاء صلاحية الـ `access_token` كوحدة ثواني Unix (Unix timestamp in seconds).
+- `expires_in`: مدة صلاحية الـ `access_token` بالثواني (مثلاً `3600` ثانية = ساعة واحدة).
+- `refresh_token`: رمز مشفر آمن عشوائي صالح لمدة **30 يوماً**، ويعمل بنظام التمديد التلقائي (Rolling / Sliding Expiration) بحيث يتجدد لـ 30 يوماً إضافية مع كل عملية تجديد ناجحة.
 
 ### 3.2 تجديد الجلسة (Refresh Token)
 - **المسار:** `POST /auth/refresh`
+- **الحماية:** عام (لا يشترط إرسال Authorization Header لأن الـ access_token يكون قد انتهت صلاحيته بالفعل).
 - **الطلب:**
 ```json
 {
-  "refresh_token": "def5020..."
+  "refresh_token": "qrt_eyJ1c2VySWQiOi..."
 }
 ```
+- **الاستجابة الناجحة (200 OK):**
+يُرجع نفس شكل استجابة تسجيل الدخول مع تدوير الـ `refresh_token` وتمديد صلاحيته لـ 30 يوماً:
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "eyJhbGciOi...جديد...",
+    "refresh_token": "qrt_eyJ1c2VySWQiOi...مُدوّر...",
+    "expires_at": 1732802400,
+    "expires_in": 3600,
+    "token_type": "bearer",
+    "user": { ... }
+  }
+}
+```
+*ملاحظة أمنية:* يتم تدوير رمز التجديد (Token Rotation) وإبطال الرمز القديم تلقائياً. في حال محاولة إعادة استخدام رمز قديم تم تدويره خارج نافذة السماح (15 ثانية)، يتم فوراً إلغاء الجلسة بالكامل لحماية الحساب من محاولات الاختراق.
 
 ### 3.3 تسجيل الخروج (Logout)
 - **المسار:** `POST /auth/logout`
 - **الحماية:** Bearer Token
+- **الطلب (اختياري لتحديد الرمز):**
+```json
+{
+  "refresh_token": "qrt_..."
+}
+```
 - **الاستجابة:** `{"success": true, "data": {"logged_out": true}}`
+*يقوم بتسجيل الخروج وإبطال جلسة الـ refresh نهائياً بحيث لا يمكن استخدام الرمز القديم مرة أخرى.*
 
 ### 3.4 بيانات المستخدم الحالي (Current User)
 - **المسار:** `GET /auth/me`

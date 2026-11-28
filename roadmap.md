@@ -10,3 +10,4 @@
 - [x] Verify database policies, API flows, conflict checks, accounting, and dashboard behavior.
 - [x] Schedule one morning push per day on the 3rd, 2nd, and 1st calendar days before each confirmed event while a balance remains (e.g. 17/18/19 for an event on the 20th at 09:00 AM Cairo time).
 - [x] Finish Firebase push dispatch and Flutter device registration guidance; confirm real phone delivery after the Flutter app registers a device token.
+- [x] Implement secure 30-day rolling refresh token session lifecycle with cryptographic rotation, reuse detection, and session revocation.

@@ -327,6 +327,13 @@ export const setTenantStatus = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.from("tenants").update({ status: data.status }).eq("id", data.tenantId);
     if (error) return asError("تعذر تحديث حالة العميل.", 500);
     await supabaseAdmin.from("profiles").update({ is_active: data.status === "active" }).eq("tenant_id", data.tenantId);
+    if (data.status === "suspended") {
+      const { revokeAllUserSessions } = await import("@/lib/session.server");
+      const { data: tenantUsers } = await supabaseAdmin.from("profiles").select("user_id").eq("tenant_id", data.tenantId);
+      for (const u of tenantUsers || []) {
+        await revokeAllUserSessions(u.user_id, "tenant_suspended");
+      }
+    }
     await supabaseAdmin.from("subscription_history").insert({ tenant_id: data.tenantId, action: data.status === "active" ? "reactivated" : "suspended", actor_user_id: context.userId, details: { previous_status: before.status } });
     await supabaseAdmin.from("audit_logs").insert({ tenant_id: data.tenantId, actor_user_id: context.userId, action: `tenant.${data.status}`, entity_type: "tenant", entity_id: data.tenantId, before_data: before, after_data: { status: data.status } });
     return { ok: true as const };
@@ -343,6 +350,8 @@ export const resetTenantPassword = createServerFn({ method: "POST" })
     if (!admin) return asError("العميل غير موجود.", 404);
     const { error } = await supabaseAdmin.auth.admin.updateUserById(admin.user_id, { password: data.newPassword });
     if (error) return asError("تعذر إعادة تعيين كلمة المرور.", 500);
+    const { revokeAllUserSessions } = await import("@/lib/session.server");
+    await revokeAllUserSessions(admin.user_id, "password_reset");
     await supabaseAdmin.from("audit_logs").insert({ tenant_id: data.tenantId, actor_user_id: context.userId, action: "tenant.password_reset", entity_type: "profile", entity_id: admin.user_id });
     return { ok: true as const };
   });
